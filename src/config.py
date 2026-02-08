@@ -14,6 +14,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _get_json_config():
+    """Load configuration from ~/.delta/config.json if it exists."""
+    config_path = Path.home() / ".delta" / "config.json"
+    if config_path.exists():
+        try:
+            import json
+            with open(config_path, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+_json_config = _get_json_config()
+
+
 @dataclass
 class APIConfig:
     """API configuration."""
@@ -21,8 +37,24 @@ class APIConfig:
     gemini_model: str = "gemini-3-pro-preview"
     
     def __post_init__(self):
-        if not self.gemini_api_key:
-            self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+        # 1. Check environment variables
+        env_key = os.getenv("GEMINI_API_KEY", "")
+        env_model = os.getenv("GEMINI_MODEL", "")
+        
+        # 2. Check JSON config fallback
+        json_key = _json_config.get("api_key", "")
+        json_model = _json_config.get("model_name", "")
+        
+        # Priority: Env > JSON > default
+        if env_key:
+            self.gemini_api_key = env_key
+        elif json_key:
+            self.gemini_api_key = json_key
+            
+        if env_model:
+            self.gemini_model = env_model
+        elif json_model:
+            self.gemini_model = json_model
 
 
 @dataclass
@@ -43,10 +75,10 @@ class ExecutionConfig:
 @dataclass
 class PathConfig:
     """Path configuration."""
-    data_dir: Path = field(default_factory=lambda: Path("./data"))
-    extensions_db: Path = field(default_factory=lambda: Path("./data/extensions.db"))
-    memory_db: Path = field(default_factory=lambda: Path("./data/memory.db"))
-    logs_dir: Path = field(default_factory=lambda: Path("./data/logs"))
+    data_dir: Path = field(default_factory=lambda: Path.home() / ".delta")
+    extensions_db: Path = field(default_factory=lambda: Path.home() / ".delta" / "extensions.db")
+    memory_db: Path = field(default_factory=lambda: Path.home() / ".delta" / "memory.db")
+    logs_dir: Path = field(default_factory=lambda: Path.home() / ".delta" / "logs")
     
     def __post_init__(self):
         base = os.getenv("DELTA_DATA_DIR")

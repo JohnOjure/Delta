@@ -87,16 +87,16 @@ For headless operation or system integration, use the CLI:
 
 ```bash
 # Start interactive mode
-python3 main.py
+./delta
 
 # Execute a single goal
-python3 main.py --goal "Analyze system logs for errors"
+./delta --goal "Analyze system logs for errors"
 ```
 
 ### Daemon Mode
 To run Delta as a background service for proactive monitoring:
 ```bash
-python3 src/daemon/service.py
+./delta --daemon
 ```
 This enables the "Heartbeat" functionality defined in `~/.delta/HEARTBEAT.md`.
 

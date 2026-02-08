@@ -1,0 +1,18 @@
+#!/bin/bash
+# Delta Agent Wrapper Script
+# Automatically uses virtual environment and handles pathing.
+
+# Get the directory where the script is located
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+# Check for virtual environment
+if [ -f "$DIR/venv/bin/python3" ]; then
+    PYTHON="$DIR/venv/bin/python3"
+else
+    # Fallback to system python if venv not found (with warning)
+    echo -e "\033[0;33mWarning: Virtual environment not found at $DIR/venv. Using system python.\033[0m"
+    PYTHON="python3"
+fi
+
+# Run main.py with all passed arguments
+"$PYTHON" "$DIR/main.py" "$@"

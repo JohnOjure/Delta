@@ -85,26 +85,23 @@ If you prefer to set up everything manually:
 ## Usage
 
 ### 1. Web Interface (GUI)
-*   **Launch**: Run `./install.sh` (it detects existing installs and just launches) or run:
-    ```bash
-    ./venv/bin/python3 src/web/server.py
-    ```
+*   **Launch**: Run `./delta --web` or click the desktop shortcut.
 *   **Access**: Open `http://localhost:8000` in your browser.
 
 ### 2. Command Line Interface (CLI)
 *   **Interactive Mode**:
     ```bash
-    ./venv/bin/python3 main.py
+    ./delta
     ```
 *   **Single Command**:
     ```bash
-    ./venv/bin/python3 main.py --goal "Research quantum computing"
+    ./delta --goal "Research quantum computing"
     ```
 
 ### 3. Background Daemon (Ghost Mode)
 To enable proactive monitoring (Heartbeat):
 ```bash
-./venv/bin/python3 src/daemon/service.py
+./delta --daemon
 ```
 *   Checks `~/.delta/HEARTBEAT.md` every 30 minutes.
 *   Monitors Downloads/Documents for new files to file.

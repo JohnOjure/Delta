@@ -194,65 +194,7 @@ async def interactive_mode(agent: Agent):
             print(f"Error: {e}")
 
 
-async def main():
-    parser = argparse.ArgumentParser(
-        description="Delta: Self-Extensible Agent System"
-    )
-    parser.add_argument(
-        "goal",
-        nargs="?",
-        help="Goal for the agent to accomplish"
-    )
-    parser.add_argument(
-        "-i", "--interactive",
-        action="store_true",
-        help="Run in interactive mode"
-    )
-    parser.add_argument(
-        "--data-dir",
-        type=str,
-        default="./data",
-        help="Directory for data storage"
-    )
-    
-    parser.add_argument(
-        "--web",
-        action="store_true",
-        help="Start the Web UI"
-    )
-    
-    args = parser.parse_args()
-    
-    # Handle Web UI Launch
-    if args.web:
-        try:
-            import uvicorn
-            import webbrowser
-            
-            url = "http://127.0.0.1:8000"
-            print(f"🌐 Starting Delta Web UI at {url}...")
-            
-            # Open browser after a slight delay to ensure server is up
-            async def open_browser():
-                await asyncio.sleep(1.5)
-                webbrowser.open(url)
-                print(f"👉 Interface opened in default browser.")
-            
-            # We can't easily await inside this synchronous block before run, 
-            # but we can schedule it if we had an event loop, or just fire and forget in a thread,
-            # or simply open it before uvicorn blocks (it might fail if server isn't ready, but usually browser retries or is slow enough)
-            
-            # Simpler approach: threaded timer
-            from threading import Timer
-            Timer(1.5, lambda: webbrowser.open(url)).start()
-            
-            uvicorn.run("src.web.server:app", host="127.0.0.1", port=8000, log_level="info")
-            return
-        except ImportError:
-            print("❌ Error: Web dependencies not installed.")
-            print("Run: pip install fastapi uvicorn websockets")
-            sys.exit(1)
-            
+async def run_agent(args):
     # Ensure configuration
     config = ensure_config()
     
@@ -299,16 +241,91 @@ async def main():
         await adapter.shutdown()
 
 
-if __name__ == "__main__":
+def main():
+    parser = argparse.ArgumentParser(
+        description="Delta: Self-Extensible Agent System"
+    )
+    parser.add_argument(
+        "goal",
+        nargs="?",
+        help="Goal for the agent to accomplish"
+    )
+    parser.add_argument(
+        "-i", "--interactive",
+        action="store_true",
+        help="Run in interactive mode"
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        default="./data",
+        help="Directory for data storage"
+    )
+    
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Start the Web UI"
+    )
+    
+    parser.add_argument(
+        "--daemon",
+        action="store_true",
+        help="Start the background daemon"
+    )
+    
+    args = parser.parse_args()
+    
+    # Handle Web UI Launch
+    if args.web:
+        try:
+            import uvicorn
+            import webbrowser
+            from threading import Timer
+            
+            url = "http://localhost:8000"
+            print(f"🌐 Starting Delta Web UI at {url}...")
+            
+            # Simple approach: threaded timer to open browser
+            Timer(1.5, lambda: webbrowser.open(url)).start()
+            
+            # Import app directly to avoid re-import issues
+            from src.web.server import app
+            
+            # Run uvicorn synchronously (this starts its own event loop)
+            # Binding to 0.0.0.0 for cross-environment accessibility
+            uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+            return
+        except ImportError:
+            print("❌ Error: Web dependencies not installed.")
+            print("Run: pip install fastapi uvicorn websockets")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ Error starting Web UI: {e}")
+            sys.exit(1)
+            
+    # Handle Daemon Launch
+    if args.daemon:
+        try:
+            from src.daemon.service import run_daemon
+            print("👻 Starting Delta background daemon...")
+            asyncio.run(run_daemon())
+            return
+        except Exception as e:
+            print(f"❌ Error starting daemon: {e}")
+            sys.exit(1)
+            
+    # Run agent in asyncio event loop
     try:
-        asyncio.run(main())
+        asyncio.run(run_agent(args))
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
         sys.exit(0)
     except Exception as e:
         print(f"\n❌ Fatal Error: {e}")
-        # Only print traceback if debug mode or specifically requested
-        # import traceback
-        # traceback.print_exc()
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
 

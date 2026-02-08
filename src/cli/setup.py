@@ -149,7 +149,7 @@ def setup_wizard():
         root = Path(__file__).parent.parent.parent
         main_py = root / "main.py"
         try:
-            print(f"🚀 Launching at http://127.0.0.1:8000 ...")
+            print(f"🚀 Launching at http://localhost:8000 ...")
             # Using sys.executable to ensure we use the same python (venv)
             subprocess.run([sys.executable, str(main_py), "--web"])
         except KeyboardInterrupt:

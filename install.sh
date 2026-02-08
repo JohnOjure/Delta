@@ -70,7 +70,7 @@ cat << EOF > install/delta.desktop
 [Desktop Entry]
 Name=Delta Agent
 Comment=AI Agent Web Interface
-Exec=bash -c "cd $PWD && ./venv/bin/python3 main.py --web"
+Exec=bash -c "cd $PWD && ./delta --web"
 Icon=utilities-terminal
 Terminal=false
 Type=Application
@@ -79,7 +79,8 @@ EOF
 
 mkdir -p ~/.local/share/applications
 cp install/delta.desktop ~/.local/share/applications/delta.desktop
-echo -e "${GREEN}[+] Desktop shortcut created.${NC}"
+ln -sf delta start.sh
+echo -e "${GREEN}[+] Desktop shortcut and start.sh created.${NC}"
 
 # Launch Onboarding
 echo -e "${CYAN}"
@@ -91,7 +92,7 @@ echo "We will now launch the setup wizard to configure your agent."
 echo "Press ENTER to continue..."
 read
 
-# Run Setup Wizard (we'll implement this next)
-python3 src/cli/setup.py
+# Run Setup Wizard
+./venv/bin/python3 src/cli/setup.py
 
 echo -e "${GREEN}Done! You can now run Delta via the desktop icon or ./start.sh${NC}"
