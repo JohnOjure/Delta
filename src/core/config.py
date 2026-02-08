@@ -24,6 +24,7 @@ class UserConfig(BaseModel):
     # Advanced settings
     auto_switch_model: bool = Field(default=False, description="Automatically switch models on failure")
     voice_enabled: bool = Field(default=False, description="Enable voice output by default")
+    power_mode: bool = Field(default=True, description="Enable unrestricted shell access (Power Mode)")
 
 
 class ConfigManager:

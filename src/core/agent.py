@@ -188,7 +188,7 @@ class Agent:
                     # Intelligent Model Switching
                     error_str = str(e).lower()
                     if "404" in error_str or "not found" in error_str or "429" in error_str or "resource" in error_str:
-                        print(f"  ⚠️ Model Error: {e}")
+                        print(f"  [!] Model Error: {e}")
                         
                         current_model = self._gemini._model_name
                         available = self._gemini.get_available_models()
@@ -200,7 +200,7 @@ class Agent:
                             next_model = available[next_idx]
                             
                             # Auto-switch
-                            print(f"  🤖 Auto-Switching to {next_model} to recover...")
+                            print(f"  [i] Auto-Switching to {next_model} to recover...")
                             await self._emit_status("Recovering", f"Switching to {next_model}")
                             self._gemini.switch_model(next_model)
                             continue 
@@ -216,6 +216,7 @@ class Agent:
                     
                     if step.action == ActionType.COMPLETE:
                         print("  Goal completed.")
+                        await self._emit_status("Completed", "Goal accomplished.")
                         # For Q&A, the actual answer is in step.details (per planning prompt)
                         # Only fall back to analysis if details is empty or generic
                         answer = step.details if step.details and step.details not in ["Goal accomplished", ""] else plan.analysis
@@ -229,6 +230,7 @@ class Agent:
                     
                     elif step.action == ActionType.FAIL:
                         print(f"  Cannot complete: {step.details}")
+                        await self._emit_status("Failed", step.details)
                         return AgentResult(
                             success=False,
                             message=step.details,
@@ -239,6 +241,7 @@ class Agent:
                     
                     elif step.action == ActionType.CREATE_EXTENSION:
                         print(f"  Creating extension: {step.details[:50]}...")
+                        await self._emit_status("Building", f"Creating extension: {step.details[:50]}...")
                         
                         # Generate extension code
                         caps = step.capabilities_needed or plan.required_capabilities
@@ -256,6 +259,7 @@ class Agent:
                         while attempt < max_attempts and not extension_valid:
                             attempt += 1
                             print(f"    Attempt {attempt}/{max_attempts}...")
+                            await self._emit_status("Building", f"Generating code (Attempt {attempt}/{max_attempts})...")
                             
                             # Generate/regenerate extension
                             if attempt == 1:
@@ -286,6 +290,7 @@ Make sure to:
                             is_valid, issues = self._generator.validate(code)
                             if not is_valid:
                                 print(f"    Syntax issues: {issues}")
+                                await self._emit_status("Fixing", f"Syntax error in generated code...")
                                 code = self._generator.fix_common_issues(code)
                                 is_valid, issues = self._generator.validate(code)
                             
@@ -304,6 +309,7 @@ Make sure to:
                             
                             # Test execution
                             print(f"    Testing {metadata.name}...")
+                            await self._emit_status("Testing", f"Verifying {metadata.name}...")
                             exec_result = await self._executor.execute(
                                 temp_record,
                                 self._adapter.get_available_capabilities()
@@ -337,6 +343,7 @@ Make sure to:
                             record = await self._registry.register(metadata, code)
                             extensions_created.append(metadata.name)
                             print(f"    Registered: {metadata.name} (validated)")
+                            await self._emit_status("Success", f"Created extension: {metadata.name}")
                             
                             # Record the successful execution
                             await self._registry.record_execution(
@@ -383,10 +390,12 @@ Make sure to:
                     elif step.action == ActionType.EXECUTE_EXTENSION:
                         ext_name = step.extension_name or step.details.split()[0]
                         print(f"  Executing: {ext_name}")
+                        await self._emit_status("Executing", f"Running extension: {ext_name}...")
                         
                         extension = await self._registry.get_by_name(ext_name)
                         if not extension:
                             print(f"    Extension not found: {ext_name}")
+                            await self._emit_status("Error", f"Extension not found: {ext_name}")
                             continue
                         
                         result = await self._executor.execute(
@@ -405,6 +414,7 @@ Make sure to:
                             print(f"    Result: {str(result.value)[:100]}...")
                         else:
                             print(f"    Error: {result.error}")
+                            await self._emit_status("Error", f"Execution failed: {result.error}")
                             
                             # Reflect on failure
                             # Reflect on failure with VISUAL context
@@ -452,6 +462,7 @@ Make sure to:
                             continue
                         
                         print(f"  Using capability: {cap_name}")
+                        await self._emit_status("Action", f"Using capability: {cap_name}...")
                         
                         # Get the capability
                         capabilities = self._adapter.get_available_capabilities()

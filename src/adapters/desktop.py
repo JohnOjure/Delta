@@ -47,6 +47,7 @@ class DesktopAdapter(BaseAdapter):
         allowed_domains: list[str] | None = None,
         resource_limits: ResourceLimits | None = None,
         enable_shell: bool = True,
+        power_mode: bool = True,  # Default to True as requested
     ):
         """Initialize the desktop adapter.
         
@@ -63,6 +64,7 @@ class DesktopAdapter(BaseAdapter):
         self._allowed_paths = allowed_paths
         self._allowed_domains = allowed_domains
         self._enable_shell = enable_shell
+        self._power_mode = power_mode
         self._limits = resource_limits or ResourceLimits(
             cpu_time_seconds=60.0,
             memory_mb=512,
@@ -119,7 +121,8 @@ class DesktopAdapter(BaseAdapter):
         if self._enable_shell:
             shell_cap = ShellCapability(
                 api_key=self._api_key,
-                working_directory=str(self._working_dir)
+                working_directory=str(self._working_dir),
+                power_mode=self._power_mode
             )
             self._capabilities["shell.exec"] = shell_cap
             self._capabilities["python.exec"] = PythonExecCapability(shell_cap)

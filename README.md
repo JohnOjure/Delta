@@ -77,26 +77,54 @@ You may manually edit the configuration file to adjust system parameters:
 
 ## Usage
 
-### Web Interface
-For the optimal user experience, launch the Delta Web Interface:
-1.  Run `./install.sh` (or click the desktop shortcut).
-2.  The interface provides real-time chat, visual indicators of the agent's thought process ("Thinking"), and direct access to system settings.
-
 ### Command Line Interface (CLI)
-For headless operation or system integration, use the CLI:
+Delta provides a robust CLI for interacting with the agent. The wrapper script `./delta` (or just `delta` if installed) handles environment setup.
 
+**Syntax:**
 ```bash
-# Start interactive mode
-./delta
-
-# Execute a single goal
-./delta --goal "Analyze system logs for errors"
+delta [command] [options]
+delta "your goal here"
 ```
+
+**Commands:**
+| Command | Description |
+| :--- | :--- |
+| `run <goal>` | Execute a specific goal (default if no command provided). |
+| `interactive` (`-i`) | Start an interactive CLI chat session. |
+| `server` (`--web`) | Start the Web UI server at `http://localhost:8000`. |
+| `daemon` (`--daemon`) | Start the background daemon process for monitoring. |
+| `help` | Show the help message. |
+
+**Options:**
+-   `--data-dir <path>`: Specify data directory (default: `~/.delta`).
+-   `--reset-memory`: Clear agent memory (Soul/User) before running.
+-   `--debug`: Enable verbose debug logging.
+
+**Examples:**
+```bash
+# one-off task
+delta "Research the best python libraries for data analysis"
+
+# Start the web interface
+delta --web
+
+# Start interactive mode
+delta --interactive
+
+# Check help
+delta help
+```
+
+### Web Interface
+For a visual experience, launch the web server:
+1.  Run `delta --web`
+2.  Open `http://localhost:8000`
+3.  The interface provides real-time chat, visual "Thinking" indicators, and extension management.
 
 ### Daemon Mode
 To run Delta as a background service for proactive monitoring:
 ```bash
-./delta --daemon
+delta --daemon
 ```
 This enables the "Heartbeat" functionality defined in `~/.delta/HEARTBEAT.md`.
 

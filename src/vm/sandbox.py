@@ -91,11 +91,11 @@ class Sandbox:
             return cls.WHITELISTED_MODULES[name]
         raise ImportError(f"Module '{name}' is not allowed in the sandbox")
     
-    def __init__(self):
-        pass
+    def __init__(self, unrestricted: bool = False):
+        self._unrestricted = unrestricted
     
     def compile(self, source_code: str, filename: str = "<extension>") -> Any:
-        """Compile source code with RestrictedPython.
+        """Compile source code.
         
         Args:
             source_code: Python source code to compile
@@ -103,25 +103,28 @@ class Sandbox:
             
         Returns:
             Compiled code object
-            
-        Raises:
-            SandboxError: If compilation fails
         """
+        if self._unrestricted:
+            try:
+                # Standard compilation allowing all operations
+                return compile(source_code, filename, "exec")
+            except SyntaxError as e:
+                raise SandboxError(f"Syntax error at line {e.lineno}: {e.msg}")
+            except Exception as e:
+                raise SandboxError(f"Compilation failed: {e}")
+
         try:
-            # RestrictedPython 8.x returns code directly or raises exceptions
+            # RestrictedPython compilation
             result = compile_restricted(
                 source_code,
                 filename=filename,
                 mode="exec"
             )
             
-            # In RestrictedPython 8.x, if there are errors it raises an exception
-            # If successful, it returns a code object directly
             if hasattr(result, 'errors') and result.errors:
                 errors = "\n".join(result.errors)
                 raise SandboxError(f"Compilation errors:\n{errors}")
             
-            # RestrictedPython 8.x returns code directly
             if hasattr(result, 'code'):
                 return result.code
             return result
@@ -137,17 +140,11 @@ class Sandbox:
         self,
         capability_bindings: dict[str, Any] = None
     ) -> dict[str, Any]:
-        """Create a restricted globals dict for execution.
+        """Create globals dict for execution."""
+        # If unrestricted, we don't use restricted globals, we use standard ones
+        # This method is primarily for the restricted path
         
-        Args:
-            capability_bindings: Dict of capability name -> callable
-                                 e.g., {"fs_read": <callable>, "net_fetch": <callable>}
-        
-        Returns:
-            Globals dict with builtins and capabilities
-        """
         # Helper for augmented assignments (+=, -=, etc.)
-        # RestrictedPython transforms "x += y" to "_inplacevar_('+=', x, y)"
         import operator as _operator
         _operators = {
             '+=': _operator.iadd,
@@ -204,14 +201,46 @@ class Sandbox:
             
         Returns:
             Result of calling the entry point function
-            
-        Raises:
-            SandboxError: If execution fails
         """
         # Compile
         code = self.compile(source_code)
         
-        # Create restricted environment
+        if self._unrestricted:
+            # Unrestricted Execution Environment
+            # We still provide capabilities, but we don't restrict builtins
+            execution_globals = {
+                "__builtins__": __builtins__,  # Full builtins access
+            }
+            if capability_bindings:
+                execution_globals.update(capability_bindings)
+            
+            execution_locals = {}
+            
+            try:
+                # Execute module
+                exec(code, execution_globals, execution_locals)
+                
+                # Find entry point
+                if entry_point not in execution_locals:
+                     raise SandboxError(f"Entry point '{entry_point}' not found.")
+                
+                entry_func = execution_locals[entry_point]
+                
+                if not callable(entry_func):
+                    raise SandboxError(f"Entry point '{entry_point}' is not callable")
+                
+                # Call entry point
+                if capability_bindings:
+                    return entry_func(**capability_bindings)
+                else:
+                    return entry_func()
+                    
+            except Exception as e:
+                # In unrestricted mode, we still want to wrap errors as SandboxError 
+                # for consistency in Executor
+                raise SandboxError(f"Execution error: {type(e).__name__}: {e}")
+
+        # Restricted Execution Path
         restricted_globals = self.create_restricted_globals(capability_bindings)
         restricted_locals = {}
         
@@ -232,7 +261,6 @@ class Sandbox:
                 raise SandboxError(f"Entry point '{entry_point}' is not callable")
             
             # Call with capability bindings as kwargs
-            # The function signature should match: def extension_main(fs_read, net_fetch, ...)
             if capability_bindings:
                 result = entry_func(**capability_bindings)
             else:
@@ -248,29 +276,31 @@ class Sandbox:
             raise SandboxError(f"Execution error: {type(e).__name__}: {e}")
     
     def validate_code(self, source_code: str) -> tuple[bool, list[str]]:
-        """Validate code without executing it.
-        
-        Returns:
-            Tuple of (is_valid, list of errors/warnings)
-        """
+        """Validate code without executing it."""
         issues = []
         
-        # Try to compile
-        try:
-            result = compile_restricted(source_code, "<validation>", "exec")
-            
-            # RestrictedPython 8.x - check if result has errors attribute
-            if hasattr(result, 'errors') and result.errors:
-                issues.extend(result.errors)
-            if hasattr(result, 'warnings') and result.warnings:
-                issues.extend(result.warnings)
-                
-        except SyntaxError as e:
-            issues.append(f"Syntax error at line {e.lineno}: {e.msg}")
-        except Exception as e:
-            issues.append(f"Validation error: {e}")
+        if self._unrestricted:
+            # In unrestricted mode, just check basic syntax
+            try:
+                compile(source_code, "<validation>", "exec")
+            except SyntaxError as e:
+                issues.append(f"Syntax error at line {e.lineno}: {e.msg}")
+            except Exception as e:
+                issues.append(f"Validation error: {e}")
+        else:
+            # Restricted validation
+            try:
+                result = compile_restricted(source_code, "<validation>", "exec")
+                if hasattr(result, 'errors') and result.errors:
+                    issues.extend(result.errors)
+                if hasattr(result, 'warnings') and result.warnings:
+                    issues.extend(result.warnings)
+            except SyntaxError as e:
+                issues.append(f"Syntax error at line {e.lineno}: {e.msg}")
+            except Exception as e:
+                issues.append(f"Validation error: {e}")
         
-        # Check for entry point
+        # Check for entry point (required in both modes)
         import ast
         try:
             tree = ast.parse(source_code)

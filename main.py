@@ -209,7 +209,8 @@ async def run_agent(args):
     adapter = DesktopAdapter(
         api_key=config.api_key,
         working_directory=Path.cwd(),
-        data_directory=data_dir
+        data_directory=data_dir,
+        power_mode=config.power_mode
     )
     await adapter.initialize()
     
@@ -241,10 +242,56 @@ async def run_agent(args):
         await adapter.shutdown()
 
 
+def print_help():
+    """Print the Delta help message."""
+    help_text = """
+Delta - Autonomous Extension System
+===================================
+
+Delta is a self-evolving AI agent capable of planning, reasoning, and creating its own tools (extensions) to solve complex tasks.
+
+Usage:
+  delta [command] [options]
+  delta "your goal here"
+
+Commands:
+  run <goal>           Execute a specific goal (default if no command provided)
+  interactive (-i)     Start an interactive session
+  server (--web)       Start the Web UI server
+  daemon (--daemon)    Start the background daemon process
+  help                 Show this help message
+
+Options:
+  --data-dir <path>    Specify data directory (default: ~/.delta)
+  --reset-memory       Clear agent memory before running
+  --debug              Enable debug logging
+
+Examples:
+  delta "Research the best python libraries for data analysis"
+  delta --web          # Start the UI at http://localhost:8000
+  delta --interactive  # Start CLI chat mode
+  delta help           # Show this message
+
+For more details, see the README.md or documentation.
+"""
+    print(help_text)
+
+
 def main():
+    # Check for "help" command before argparse to override default behavior if needed, 
+    # though argparse handles -h/--help. "delta help" ends up as goal="help".
+    if len(sys.argv) > 1 and sys.argv[1] == "help":
+        print_help()
+        sys.exit(0)
+
     parser = argparse.ArgumentParser(
-        description="Delta: Self-Extensible Agent System"
+        description="Delta: Self-Extensible Agent System",
+        add_help=False # We'll handle help manually or via our custom flag if we wanted, but let's keep default -h too.
+                       # Actually, keeping default -h is good.
     )
+    # Re-enable default help but with our formatter if we wanted, but simplistic is fine.
+    # Let's just catch "help" as a positional arg.
+    
     parser.add_argument(
         "goal",
         nargs="?",
@@ -274,7 +321,18 @@ def main():
         help="Start the background daemon"
     )
     
+    # Custom help flag to use our print_help
+    parser.add_argument(
+        "-h", "--help",
+        action="store_true",
+        help="Show this help message and exit"
+    )
+    
     args = parser.parse_args()
+    
+    if args.help:
+        print_help()
+        sys.exit(0)
     
     # Handle Web UI Launch
     if args.web:

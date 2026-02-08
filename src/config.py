@@ -27,9 +27,6 @@ def _get_json_config():
     return {}
 
 
-_json_config = _get_json_config()
-
-
 @dataclass
 class APIConfig:
     """API configuration."""
@@ -41,15 +38,20 @@ class APIConfig:
         env_key = os.getenv("GEMINI_API_KEY", "")
         env_model = os.getenv("GEMINI_MODEL", "")
         
-        # 2. Check JSON config fallback
-        json_key = _json_config.get("api_key", "")
-        json_model = _json_config.get("model_name", "")
+        # 2. Check JSON config fallback (load fresh every time)
+        json_config = _get_json_config()
+        json_key = json_config.get("api_key", "")
+        json_model = json_config.get("model_name", "")
         
         # Priority: Env > JSON > default
         if env_key:
+            print(f"DEBUG: Using API Key from ENV: {env_key[:4]}...{env_key[-4:]}")
             self.gemini_api_key = env_key
         elif json_key:
+            print(f"DEBUG: Using API Key from JSON: {json_key[:4]}...{json_key[-4:]}")
             self.gemini_api_key = json_key
+        else:
+            print("DEBUG: No API Key found in ENV or JSON")
             
         if env_model:
             self.gemini_model = env_model
@@ -64,12 +66,14 @@ class ExecutionConfig:
     cpu_time_seconds: float = 30.0
     memory_mb: int = 128
     timeout_seconds: float = 300.0
+    power_mode: bool = True  # NO RESTRICTIONS mode
     
     def __post_init__(self):
         self.max_iterations = int(os.getenv("DELTA_MAX_ITERATIONS", self.max_iterations))
         self.cpu_time_seconds = float(os.getenv("DELTA_CPU_TIME", self.cpu_time_seconds))
         self.memory_mb = int(os.getenv("DELTA_MEMORY_MB", self.memory_mb))
         self.timeout_seconds = float(os.getenv("DELTA_TIMEOUT", self.timeout_seconds))
+        self.power_mode = os.getenv("DELTA_POWER_MODE", str(self.power_mode)).lower() == "true"
 
 
 @dataclass

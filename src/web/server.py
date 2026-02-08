@@ -274,6 +274,7 @@ async def get_config_endpoint():
 async def update_config_endpoint(start_config: dict):
     """Update configuration."""
     from src.core.config import ConfigManager
+    from src.config import reset_config
     
     manager = ConfigManager()
     config = manager.load()
@@ -300,17 +301,19 @@ async def update_config_endpoint(start_config: dict):
                 is_masked = True
         
         if not is_masked and new_key != "********":
-            updates["api_key"] = new_key
+            # Trim whitespace from API key
+            updates["api_key"] = new_key.strip()
 
     if "usage_limit" in start_config: updates["usage_limit"] = int(start_config["usage_limit"])
     if "voice_enabled" in start_config: updates["voice_enabled"] = bool(start_config["voice_enabled"])
     
     manager.update(**updates)
     
+    # Reset the global config cache
+    reset_config()
+    
     global _agent, _adapter
     # If API key or Model changed, we might need to re-init agent components
-    # For now, simplest is to ask user to restart, or we can hot-reload if careful.
-    # Hot reload agent:
     if "api_key" in updates or "model_name" in updates:
         _agent = None # Force re-creation on next get_agent()
         _adapter = None

@@ -8,7 +8,9 @@
     <link rel="stylesheet" href="/static/style.css?v=12">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
 </head>
 
 <body>
@@ -23,12 +25,15 @@
             </div>
 
             <nav class="sidebar-nav">
+                <button class="nav-item action-primary" id="new-chat-btn">
+                    <span>+</span>
+                    <span class="nav-label">New chat</span>
+                </button>
+                <div class="sidebar-divider" style="margin: 8px 0;"></div>
                 <button class="nav-item active" data-view="chat">
-                    <span class="nav-icon">💬</span>
                     <span class="nav-label">Chat</span>
                 </button>
                 <button class="nav-item" data-view="extensions">
-                    <span class="nav-icon">🧩</span>
                     <span class="nav-label">Extensions</span>
                 </button>
             </nav>
@@ -46,7 +51,6 @@
 
             <div class="sidebar-footer">
                 <button id="settings-btn" class="footer-item">
-                    <span class="footer-icon">⚙️</span>
                     <span class="footer-label">Settings</span>
                 </button>
                 <div class="system-status">
@@ -64,27 +68,7 @@
             <section id="view-chat" class="view active">
                 <div class="chat-viewport" id="chat-container">
                     <div class="welcome-hero" id="welcome-screen">
-                        <div class="hero-burst"></div>
-                        <h1 class="hero-title">Hello, I'm <span class="text-gradient">Delta</span></h1>
-                        <p class="hero-subtitle">The first self-extensible agent. I build my own tools to help you succeed.</p>
-                        
-                        <div class="quick-cards">
-                            <div class="quick-card">
-                                <div class="card-icon">🏗️</div>
-                                <h3>Auto-Coding</h3>
-                                <p>I write and fix my own python extensions in real-time.</p>
-                            </div>
-                            <div class="quick-card">
-                                <div class="card-icon">⚡</div>
-                                <h3>True Agency</h3>
-                                <p>I don't just chat; I think, plan, and act autonomously.</p>
-                            </div>
-                            <div class="quick-card">
-                                <div class="card-icon">🛡️</div>
-                                <h3>Resilience</h3>
-                                <p>If I hit a wall, I find an alternative path to the goal.</p>
-                            </div>
-                        </div>
+                        <h1 class="hero-title">Delta</h1>
                     </div>
 
                     <div class="message-list" id="messages"></div>
@@ -94,13 +78,23 @@
                 <!-- Floating Input Area -->
                 <div class="input-nexus">
                     <div class="input-wrapper">
-                        <textarea id="message-input" placeholder="What's the mission?" rows="1"></textarea>
+                        <textarea id="message-input" placeholder="Enter instructions..." rows="1"></textarea>
                         <div class="input-actions">
                             <button id="mic-btn" class="action-btn" title="Voice Command">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                                    <line x1="12" y1="19" x2="12" y2="23" />
+                                    <line x1="8" y1="23" x2="16" y2="23" />
+                                </svg>
                             </button>
                             <button id="send-btn" class="send-btn">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="22" y1="2" x2="11" y2="13" />
+                                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                                </svg>
                             </button>
                         </div>
                     </div>

@@ -16,7 +16,8 @@ class DeltaApp {
             statusText: document.getElementById('status-text'),
             extensionsGrid: document.getElementById('extensions-grid'),
             views: document.querySelectorAll('.view'),
-            navItems: document.querySelectorAll('.nav-item')
+            navItems: document.querySelectorAll('.nav-item'),
+            newChatBtn: document.getElementById('new-chat-btn')
         };
 
         this.ws = null;
@@ -33,7 +34,7 @@ class DeltaApp {
         this.loadRecentChats();
         this.loadSettings();
         this.autoResizeInput();
-        
+
         // Restore previous chat if any
         if (this.chatMessages.length > 0) {
             this.elements.welcomeScreen.classList.add('hidden');
@@ -64,8 +65,15 @@ class DeltaApp {
     bindEvents() {
         // Navigation
         this.elements.navItems.forEach(item => {
-            item.addEventListener('click', () => this.switchView(item.dataset.view));
+            if (!item.id || item.id !== 'new-chat-btn') {
+                item.addEventListener('click', () => this.switchView(item.dataset.view));
+            }
         });
+
+        // New Chat
+        if (this.elements.newChatBtn) {
+            this.elements.newChatBtn.addEventListener('click', () => this.startNewChat());
+        }
 
         // Chat
         this.elements.sendBtn.addEventListener('click', () => this.sendMessage());
@@ -93,7 +101,7 @@ class DeltaApp {
         if (micBtn && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             this.recognition = new SpeechRecognition();
-            
+
             this.recognition.onresult = (event) => {
                 const transcript = event.results[0][0].transcript;
                 this.elements.messageInput.value = transcript;
@@ -115,7 +123,7 @@ class DeltaApp {
 
     switchView(viewName) {
         this.currentView = viewName;
-        
+
         // Update Nav
         this.elements.navItems.forEach(item => {
             item.classList.toggle('active', item.dataset.view === viewName);
@@ -131,16 +139,33 @@ class DeltaApp {
         }
     }
 
+    startNewChat() {
+        if (this.isRunning) return; // Don't interrupt active mission
+
+        // Clear state
+        this.chatMessages = [];
+        this.saveChatHistory();
+
+        // Reset UI
+        this.elements.messages.innerHTML = '';
+        this.elements.welcomeScreen.classList.remove('hidden');
+        this.elements.messageInput.value = '';
+        this.elements.messageInput.style.height = 'auto';
+
+        // Switch to chat view if not already there
+        this.switchView('chat');
+    }
+
     async sendMessage() {
         const goal = this.elements.messageInput.value.trim();
         if (!goal || this.isRunning) return;
 
         this.elements.welcomeScreen.classList.add('hidden');
         this.addMessage('user', goal);
-        
+
         this.elements.messageInput.value = '';
         this.elements.messageInput.style.height = 'auto';
-        
+
         this.setRunning(true, 'Consulting Brain...');
         this.showTyping(true);
 
@@ -155,12 +180,12 @@ class DeltaApp {
                 this.updateThinking(data.activity, data.details);
                 break;
             case 'result':
-                this.showTyping(false);
+                this.finishThinking(true);
                 this.handleResult(data);
                 this.setRunning(false);
                 break;
             case 'error':
-                this.showTyping(false);
+                this.finishThinking(false);
                 this.addMessage('agent', data.error || 'Operation failed', 'error');
                 this.setRunning(false);
                 break;
@@ -213,7 +238,7 @@ class DeltaApp {
 
     formatMarkdown(text) {
         if (!text) return '';
-        
+
         // Code Blocks
         text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
             return `<div class="code-block-wrapper">
@@ -224,10 +249,10 @@ class DeltaApp {
 
         // Inline Code
         text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
-        
+
         // Bold
         text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        
+
         // Line Breaks
         text = text.replace(/\n/g, '<br>');
 
@@ -242,30 +267,93 @@ class DeltaApp {
 
     updateThinking(activity, details) {
         this.showTyping(true);
-        this.elements.statusText.textContent = activity || 'Thinking...';
+        const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-        let thinkingBox = this.elements.typingIndicator.querySelector('.thinking-box');
-        if (!thinkingBox) {
-            thinkingBox = document.createElement('div');
-            thinkingBox.className = 'thinking-box';
-            this.elements.typingIndicator.appendChild(thinkingBox);
+        // Find or create current thinking process block
+        let currentProcess = this.elements.messages.querySelector('.thinking-process.active');
+        
+        if (!currentProcess) {
+            // Create new thinking block
+            currentProcess = document.createElement('div');
+            currentProcess.className = 'thinking-process active expanded'; // Default expanded
+            currentProcess.innerHTML = `
+                <div class="thinking-header">
+                    <div class="thinking-title">
+                        <div class="thinking-spinner"></div>
+                        <span class="process-status">${activity || 'Processing...'}</span>
+                    </div>
+                    <span class="thinking-toggle">▼</span>
+                </div>
+                <div class="thinking-logs">
+                    <div class="log-list"></div>
+                </div>
+            `;
+            
+            // Toggle Logic
+            currentProcess.querySelector('.thinking-header').onclick = () => {
+                currentProcess.classList.toggle('expanded');
+            };
+
+            this.elements.messages.appendChild(currentProcess);
         }
 
-        thinkingBox.innerHTML = `
-            <div class="thinking-header">
-                <div class="thinking-activity">${activity || 'Processing...'}</div>
-            </div>
-            ${details ? `<div class="thinking-details">${details}</div>` : ''}
-        `;
+        // Update Status Title
+        if (activity) {
+            currentProcess.querySelector('.process-status').textContent = activity;
+        }
+
+        // Append Log Details
+        if (details) {
+            const logList = currentProcess.querySelector('.log-list');
+            const logItem = document.createElement('div');
+            
+            // Detect type based on keywords
+            let type = 'default';
+            if (details.toLowerCase().includes('error') || details.toLowerCase().includes('fail')) type = 'error';
+            else if (details.toLowerCase().includes('success') || details.toLowerCase().includes('completed')) type = 'success';
+            else if (details.toLowerCase().includes('creating') || details.toLowerCase().includes('building')) type = 'info';
+            else if (details.toLowerCase().includes('warning')) type = 'warning';
+
+            logItem.className = `log-item ${type}`;
+            logItem.innerHTML = `
+                <span class="timestamp">[${timestamp}]</span>
+                <span class="content">${this.escapeHtml(details)}</span>
+            `;
+            
+            logList.appendChild(logItem);
+            
+            // Auto-scroll logs
+            const logsContainer = currentProcess.querySelector('.thinking-logs');
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+
         this.scrollToBottom();
     }
 
     showTyping(show) {
-        this.elements.typingIndicator.classList.toggle('hidden', !show);
-        if (!show) {
-            this.elements.typingIndicator.innerHTML = '';
+        // We now use inline thinking processes in the message list, 
+        // so we just hide the old fixed typing indicator
+        this.elements.typingIndicator.classList.add('hidden');
+    }
+
+    finishThinking(success = true) {
+        const currentProcess = this.elements.messages.querySelector('.thinking-process.active');
+        if (currentProcess) {
+            currentProcess.classList.remove('active');
+            const spinner = currentProcess.querySelector('.thinking-spinner');
+            if (spinner) {
+                spinner.style.border = 'none';
+                spinner.style.animation = 'none';
+                spinner.textContent = success ? '✓' : '✗';
+                spinner.style.color = success ? 'var(--accent-primary)' : '#f87171';
+                spinner.style.display = 'flex';
+                spinner.style.alignItems = 'center';
+                spinner.style.justifyContent = 'center';
+                spinner.style.fontWeight = 'bold';
+            }
+            // Auto collapse on finish after a delay? Maybe keep expanded for review.
+            // currentProcess.classList.remove('expanded'); 
         }
-        this.scrollToBottom();
     }
 
     async loadExtensions() {
@@ -284,7 +372,6 @@ class DeltaApp {
             const card = document.createElement('div');
             card.className = 'extension-card';
             card.innerHTML = `
-                <div class="ext-icon">⚙️</div>
                 <h3 class="ext-name">${ext.name}</h3>
                 <p class="ext-desc">${ext.description || 'No description available.'}</p>
                 <div class="ext-meta">
@@ -301,11 +388,11 @@ class DeltaApp {
         try {
             const res = await fetch(`/api/extensions/${name}`);
             const ext = await res.json();
-            
+
             document.getElementById('ext-detail-title').textContent = ext.name;
             document.getElementById('ext-detail-desc').textContent = ext.description;
             document.getElementById('ext-detail-stats').textContent = `${ext.executions} successful executions since ${new Date(ext.created_at).toLocaleDateString()}`;
-            
+
             const capsList = document.getElementById('ext-detail-caps');
             capsList.innerHTML = '';
             ext.capabilities.forEach(cap => {
@@ -316,7 +403,7 @@ class DeltaApp {
             });
 
             document.getElementById('ext-detail-code').textContent = ext.source_code;
-            
+
             document.getElementById('extension-modal').classList.remove('hidden');
         } catch (e) {
             console.error('Error fetching extension details:', e);
@@ -326,7 +413,7 @@ class DeltaApp {
     loadRecentChats() {
         const history = this.elements.chatHistory;
         history.innerHTML = '';
-        
+
         // This is a placeholder for actual multi-chat history
         // For now, we just show "Current Mission" if there are messages
         if (this.chatMessages.length > 0) {

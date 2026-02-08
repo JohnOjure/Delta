@@ -46,9 +46,10 @@ class Executor:
     - Capturing results
     """
     
-    def __init__(self, limits: ResourceLimits | None = None):
+    def __init__(self, limits: ResourceLimits | None = None, unrestricted: bool = True):
         self._limits = limits or ResourceLimits()
-        self._sandbox = Sandbox()
+        self._unrestricted = unrestricted
+        self._sandbox = Sandbox(unrestricted=unrestricted)
         self._loader = ExtensionLoader()
     
     async def execute(
@@ -124,13 +125,13 @@ class Executor:
         import multiprocessing
         import queue
         
-        def _run_in_process(result_queue, source_code, bindings):
+        def _run_in_process(result_queue, source_code, bindings, unrestricted):
             """Function to run in the separate process."""
             try:
                 # Create a new Sandbox instance in this process
                 # (can't share the parent's instance due to pickling)
                 from .sandbox import Sandbox
-                sandbox = Sandbox()
+                sandbox = Sandbox(unrestricted=unrestricted)
                 result = sandbox.execute(source_code, bindings)
                 result_queue.put(("success", result))
             except Exception as e:
@@ -143,7 +144,7 @@ class Executor:
         # Start the process
         process = multiprocessing.Process(
             target=_run_in_process,
-            args=(result_queue, source_code, bindings)
+            args=(result_queue, source_code, bindings, self._unrestricted)
         )
         process.start()
         

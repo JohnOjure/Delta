@@ -138,25 +138,27 @@ class ShellCapability(Capability):
         api_key: str,
         working_directory: str = ".",
         timeout: float = 300.0,  # 5 minutes default
-        require_approval: bool = False  # Also require human approval?
+        require_approval: bool = False,  # Also require human approval?
+        power_mode: bool = False  # NO RESTRICTIONS mode
     ):
         self._safety_agent = SafetyAgent(api_key)
         self._working_dir = working_directory
         self._timeout = timeout
         self._require_approval = require_approval
+        self._power_mode = power_mode
     
     @property
     def descriptor(self) -> CapabilityDescriptor:
         return CapabilityDescriptor(
             name="shell.exec",
-            description="Execute a shell command (reviewed by safety agent)",
+            description="Execute a shell command" + (" (UNRESTRICTED POWER MODE)" if self._power_mode else " (reviewed by safety agent)"),
             status=CapabilityStatus.AVAILABLE,
             parameters={
                 "command": "str - The shell command to execute",
-                "context": "str - Why this command is needed (helps safety review)"
+                "context": "str - Why this command is needed (optional in power mode)"
             },
             returns="dict - {stdout, stderr, return_code}",
-            restrictions=[
+            restrictions=[] if self._power_mode else [
                 "All commands reviewed by safety agent",
                 f"Timeout: {self._timeout}s",
                 "Dangerous operations will be blocked"
@@ -170,23 +172,26 @@ class ShellCapability(Capability):
         if not command:
             return CapabilityResult.fail("Missing required parameter: command")
         
-        # Step 1: Safety review
-        print(f"  🔒 Safety agent reviewing: {command[:50]}...")
-        review = await self._safety_agent.review(command, context)
-        
-        if not review.get("allowed", False):
-            risk = review.get("risk_level", "unknown")
-            reason = review.get("reason", "No reason given")
-            suggestion = review.get("suggested_modification")
+        # Step 1: Safety review (skipped in power mode)
+        if self._power_mode:
+            print(f"  ⚡ Power mode enabled: skipping safety review for '{command[:30]}...'")
+        else:
+            print(f"  🔒 Safety agent reviewing: {command[:50]}...")
+            review = await self._safety_agent.review(command, context)
             
-            msg = f"Command blocked ({risk} risk): {reason}"
-            if suggestion:
-                msg += f"\nSuggested alternative: {suggestion}"
+            if not review.get("allowed", False):
+                risk = review.get("risk_level", "unknown")
+                reason = review.get("reason", "No reason given")
+                suggestion = review.get("suggested_modification")
+                
+                msg = f"Command blocked ({risk} risk): {reason}"
+                if suggestion:
+                    msg += f"\nSuggested alternative: {suggestion}"
+                
+                print(f"  ❌ BLOCKED: {reason}")
+                return CapabilityResult.fail(msg)
             
-            print(f"  ❌ BLOCKED: {reason}")
-            return CapabilityResult.fail(msg)
-        
-        print(f"  ✅ Approved (risk: {review.get('risk_level', 'unknown')})")
+            print(f"  ✅ Approved (risk: {review.get('risk_level', 'unknown')})")
         
         # Step 2: Optional human approval
         if self._require_approval:
