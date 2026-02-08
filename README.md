@@ -58,7 +58,7 @@ You may manually edit the configuration file to adjust system parameters:
 
 | Parameter | Type | Description |
 | :--- | :--- | :--- |
-| `model_name` | string | The Gemini model identifier (e.g., `gemini-2.0-flash`). |
+| `model_name` | string | The Gemini model identifier (e.g., `gemini-3-pro-preview`). |
 | `api_key` | string | Your Google Gemini API key. |
 | `voice_enabled` | boolean | Toggles text-to-speech output. |
 | `usage_limit` | integer | Maximum number of API requests allowed per day. |
