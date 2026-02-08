@@ -28,6 +28,18 @@ Delta is equipped with a comprehensive suite of native capabilities, extensible 
 -   **Persistent Memory ("Soul")**: Maintains a continuous identity via `SOUL.md` and learns user preferences (`USER.md`) over time to adapt its behavior.
 -   **Proactive Monitoring ("Heartbeat")**: Periodically evaluates system health and user-defined constraints (e.g., disk usage, schedule conflicts) to preemptively address issues.
 
+### Safety Net Extensions
+Delta includes hardcoded "Safety Net" extensions that are always available, ensuring basic functionality even if LLM code generation fails:
+-   `fs_read` - Read file contents
+-   `fs_write` - Write/create files
+-   `fs_list` - List directory contents
+-   `fs_search` - Search for files by pattern
+-   `system_stats` - Get system resource usage
+
+### Security Features
+-   **API Key Masking**: API keys are never exposed in the Web UI configuration endpoint.
+-   **Sandboxed Execution**: All generated code runs in a restricted Python environment with resource limits.
+
 ## Installation
 
 ### Prerequisites
@@ -58,7 +70,7 @@ You may manually edit the configuration file to adjust system parameters:
 
 | Parameter | Type | Description |
 | :--- | :--- | :--- |
-| `model_name` | string | The Gemini model identifier (e.g., `gemini-2.0-flash`). |
+| `model_name` | string | The Gemini model identifier (e.g., `gemini-3-pro-preview`). |
 | `api_key` | string | Your Google Gemini API key. |
 | `voice_enabled` | boolean | Toggles text-to-speech output. |
 | `usage_limit` | integer | Maximum number of API requests allowed per day. |

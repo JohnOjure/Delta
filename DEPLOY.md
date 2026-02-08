@@ -60,7 +60,7 @@ delta config --show
 To update settings:
 ```bash
 # Change model
-delta config --model gemini-1.5-pro
+delta config --model gemini-3-pro-preview
 
 # Update user name
 delta config --name "Your Name"

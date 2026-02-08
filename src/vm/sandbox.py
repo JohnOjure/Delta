@@ -36,6 +36,18 @@ class Sandbox:
     - Guards attribute and item access
     """
     
+    # Modules that are safe to import inside extensions
+    WHITELISTED_MODULES = {
+        "pathlib": __import__("pathlib"),
+        "shutil": __import__("shutil"),
+        "psutil": __import__("psutil"),
+        "json": __import__("json"),
+        "re": __import__("re"),
+        "datetime": __import__("datetime"),
+        "math": __import__("math"),
+        "os.path": __import__("os.path"),
+    }
+    
     # Builtins allowed in the sandbox
     SAFE_BUILTINS = {
         **safe_builtins,
@@ -71,6 +83,13 @@ class Sandbox:
         "getattr": getattr,
         "print": print,  # Safe for output
     }
+    
+    @classmethod
+    def _safe_import(cls, name, *args, **kwargs):
+        """Safe import function that only allows whitelisted modules."""
+        if name in cls.WHITELISTED_MODULES:
+            return cls.WHITELISTED_MODULES[name]
+        raise ImportError(f"Module '{name}' is not allowed in the sandbox")
     
     def __init__(self):
         pass
@@ -151,7 +170,7 @@ class Sandbox:
             return _operators[op](x, y)
         
         restricted_globals = {
-            "__builtins__": self.SAFE_BUILTINS,
+            "__builtins__": {**self.SAFE_BUILTINS, "__import__": self._safe_import},
             "_getattr_": default_guarded_getattr,
             "_getitem_": default_guarded_getitem,
             "_iter_unpack_sequence_": guarded_iter_unpack_sequence,
@@ -160,6 +179,9 @@ class Sandbox:
             "_write_": lambda x: x,  # Allow simple writes
             "_inplacevar_": _inplacevar_,  # Support +=, -=, etc.
         }
+        
+        # Pre-inject whitelisted modules for convenience
+        restricted_globals.update(self.WHITELISTED_MODULES)
         
         # Add capability bindings
         if capability_bindings:

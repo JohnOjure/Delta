@@ -126,6 +126,24 @@ async def run_goal(request: GoalRequest):
     }
 
 
+class GhostAlert(BaseModel):
+    """Ghost Mode alert message."""
+    severity: str = "medium"
+    message: str
+
+
+@app.post("/api/ghost/alert")
+async def ghost_alert(alert: GhostAlert):
+    """Broadcast a Ghost Mode alert to all connected WebSocket clients."""
+    await manager.broadcast({
+        "type": "ghost_alert",
+        "severity": alert.severity,
+        "message": alert.message,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+    return {"success": True, "broadcast_to": len(manager.active_connections)}
+
+
 @app.get("/api/extensions")
 async def list_extensions():
     """List all extensions."""
@@ -234,15 +252,21 @@ async def get_stats():
 async def get_config_endpoint():
     """Get current configuration."""
     config_mgr = get_config()
-    # Return as dict, hiding full API key for security if needed, 
-    # but user needs to see it to edit it usually. 
-    # Let's show it since it's local.
+    
+    # Mask API key for security
+    api_key = config_mgr.api.gemini_api_key
+    masked_key = ""
+    if api_key and len(api_key) > 8:
+        masked_key = f"{api_key[:4]}...{api_key[-4:]}"
+    elif api_key:
+        masked_key = "********"
+        
     return {
-        "user_name": config_mgr.user_name,
-        "model_name": config_mgr.model_name,
-        "api_key": config_mgr.api_key,
-        "usage_limit": config_mgr.usage_limit,
-        "voice_enabled": config_mgr.voice_enabled
+        "user_name": config_mgr.user_name if hasattr(config_mgr, "user_name") else "User",
+        "model_name": config_mgr.api.gemini_model,
+        "api_key": masked_key,
+        "usage_limit": config_mgr.execution.max_iterations, # mapping usage_limit to max_iterations for now or just checking if usage_limit exists
+        "voice_enabled": False # config_mgr doesn't seem to have voice_enabled in the Dataclass, defaulting to False
     }
 
 
@@ -252,12 +276,32 @@ async def update_config_endpoint(start_config: dict):
     from src.core.config import ConfigManager
     
     manager = ConfigManager()
-    manager.load()
+    config = manager.load()
+    
+    if not config:
+        return {"success": False, "message": "No configuration found"}
     
     updates = {}
     if "user_name" in start_config: updates["user_name"] = start_config["user_name"]
     if "model_name" in start_config: updates["model_name"] = start_config["model_name"]
-    if "api_key" in start_config: updates["api_key"] = start_config["api_key"]
+    
+    # Handle API Key updates safely
+    if "api_key" in start_config:
+        new_key = start_config["api_key"]
+        
+        # Get current key from loaded config
+        current_key = config.api_key if hasattr(config, 'api_key') else ""
+        
+        # Check if this is the masked key being sent back
+        is_masked = False
+        if current_key and len(current_key) > 8:
+            masked_version = f"{current_key[:4]}...{current_key[-4:]}"
+            if new_key == masked_version:
+                is_masked = True
+        
+        if not is_masked and new_key != "********":
+            updates["api_key"] = new_key
+
     if "usage_limit" in start_config: updates["usage_limit"] = int(start_config["usage_limit"])
     if "voice_enabled" in start_config: updates["voice_enabled"] = bool(start_config["voice_enabled"])
     

@@ -18,7 +18,7 @@ load_dotenv()
 class APIConfig:
     """API configuration."""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3-pro-preview"
     
     def __post_init__(self):
         if not self.gemini_api_key:

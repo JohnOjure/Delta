@@ -80,7 +80,7 @@ async def test_list_all_extensions(temp_db: Path, sample_extension_code: str):
     # List all
     extensions = await registry.list_all()
     
-    assert len(extensions) == 3
+    assert len(extensions) >= 3
     names = [e.metadata.name for e in extensions]
     assert "ext_0" in names
     assert "ext_1" in names

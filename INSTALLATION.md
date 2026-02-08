@@ -37,7 +37,7 @@ The "Magic Installer" handles all dependencies, virtual environment creation, an
 3.  **Onboarding Wizard**
     The script will automatically launch `src/cli/setup.py`. Follow the prompts to:
     *   Enter your **Google Gemini API Key**.
-    *   Choose your preferred model (Default: `gemini-2.0-flash`).
+    *   Choose your preferred model (Default: `gemini-3-pro-preview`).
     *   Set up your User Name (for `USER.md`).
 
 ## Manual Installation
@@ -74,7 +74,7 @@ If you prefer to set up everything manually:
             "gemini_api_key": "YOUR_KEY_HERE"
         },
         "llm": {
-            "model_name": "gemini-2.0-flash"
+            "model_name": "gemini-3-pro-preview"
         },
         "user": {
             "name": "User"
@@ -113,4 +113,4 @@ To enable proactive monitoring (Heartbeat):
 
 *   **`ModuleNotFoundError`**: Ensure you activated the venv (`source venv/bin/activate`).
 *   **`403/401 API Error`**: specificy a valid API key in `~/.delta/config.json`.
-*   **`404 Model Not Found`**: Ensure your API key has access to `gemini-2.0-flash` or switch to `gemini-1.5-flash` in config.
+*   **`404 Model Not Found`**: Ensure your API key has access to `gemini-3-pro-preview` or switch to `gemini-1.5-flash` in config.

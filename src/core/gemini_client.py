@@ -73,7 +73,7 @@ Analyze system metrics and decide if the user needs to be alerted.
 4. Suggest specific actions (e.g., "Kill process X", "Clear cache").""",
     }
     
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-3-pro-preview"):
         """Initialize Gemini client.
         
         Args:
@@ -82,8 +82,8 @@ Analyze system metrics and decide if the user needs to be alerted.
         """
         self._client = genai.Client(api_key=api_key)
         self._model_name = model
-        # Use flash for planning (thinking models may not be available)
-        self._thinking_model = "gemini-2.0-flash"
+        # Use gemini-3-pro-preview for high-reasoning tasks
+        self._thinking_model = "gemini-3-pro-preview"
         self._mode = "planning"
     
     def set_mode(self, mode: str) -> None:
@@ -103,9 +103,7 @@ Analyze system metrics and decide if the user needs to be alerted.
     def get_available_models(self) -> list[str]:
         """Get list of supported models."""
         return [
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-2.0-flash"
+            "gemini-3-pro-preview",
         ]
 
     
