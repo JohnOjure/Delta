@@ -101,6 +101,13 @@ class DesktopAdapter(BaseAdapter):
             "storage.delete": StorageDeleteCapability(self._storage),
         }
         
+        # Vision capability (optional - requires mss)
+        try:
+            from src.capabilities.vision import VisionCapability
+            self._capabilities["vision.capture_screen"] = VisionCapability()
+        except ImportError:
+            pass  # mss not installed
+        
         # Shell capabilities (if enabled)
         if self._enable_shell:
             shell_cap = ShellCapability(

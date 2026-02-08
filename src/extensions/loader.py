@@ -61,13 +61,13 @@ class ExtensionLoader:
     def create_capability_bindings(
         self,
         extension: ExtensionRecord,
-        available_capabilities: dict[str, Capability]
+        available_capabilities: dict[str, Any]
     ) -> tuple[dict[str, Any], list[str]]:
         """Create bindings from capability names to callable objects.
         
         Args:
             extension: The extension record
-            available_capabilities: Available capabilities from the adapter
+            available_capabilities: Available capabilities (Capability objects or plain callables)
             
         Returns:
             Tuple of (bindings dict, list of missing capabilities)
@@ -77,25 +77,44 @@ class ExtensionLoader:
         
         for cap_name in extension.metadata.required_capabilities:
             if cap_name in available_capabilities:
-                # Create a sync wrapper for the capability
                 cap = available_capabilities[cap_name]
                 
-                # Wrapper that converts async to sync
-                def make_wrapper(capability):
-                    def wrapper(**kwargs):
-                        import asyncio
-                        result = asyncio.get_event_loop().run_until_complete(
-                            capability.execute(**kwargs)
-                        )
-                        if result.success:
-                            return result.value
-                        else:
-                            raise RuntimeError(f"Capability error: {result.error}")
-                    return wrapper
-                
-                # Use underscores for binding name: fs.read -> fs_read
-                binding_name = cap_name.replace(".", "_")
-                bindings[binding_name] = make_wrapper(cap)
+                # Check if it's a Capability object or a plain callable
+                if isinstance(cap, Capability):
+                    # Wrapper that converts async Capability to sync (works in thread pool)
+                    def make_wrapper(capability):
+                        def wrapper(**kwargs):
+                            import asyncio
+                            # Get or create event loop for this thread
+                            try:
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    # We're in an async context, need to run in new loop
+                                    import concurrent.futures
+                                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                                        future = pool.submit(
+                                            lambda: asyncio.run(capability.execute(**kwargs))
+                                        )
+                                        result = future.result()
+                                else:
+                                    result = loop.run_until_complete(capability.execute(**kwargs))
+                            except RuntimeError:
+                                # No event loop exists in this thread, create one
+                                result = asyncio.run(capability.execute(**kwargs))
+                            
+                            if result.success:
+                                return result.value
+                            else:
+                                raise RuntimeError(f"Capability error: {result.error}")
+                        return wrapper
+                    
+                    # Use underscores for binding name: fs.read -> fs_read
+                    binding_name = cap_name.replace(".", "_")
+                    bindings[binding_name] = make_wrapper(cap)
+                else:
+                    # It's a plain callable (e.g., test mock function)
+                    binding_name = cap_name.replace(".", "_")
+                    bindings[binding_name] = cap
             else:
                 missing.append(cap_name)
         
@@ -104,7 +123,7 @@ class ExtensionLoader:
     def prepare_for_execution(
         self,
         extension: ExtensionRecord,
-        available_capabilities: dict[str, Capability]
+        available_capabilities: dict[str, Any]
     ) -> tuple[str, dict[str, Any], list[str]]:
         """Prepare an extension for execution.
         

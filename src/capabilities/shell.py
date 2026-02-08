@@ -11,11 +11,27 @@ All commands are reviewed by a safety agent before execution.
 
 import asyncio
 import subprocess
+import json
 from typing import Any
-import google.generativeai as genai
+from google import genai
 
 from src.models.capability import CapabilityDescriptor, CapabilityResult, CapabilityStatus
 from .base import Capability
+
+# Dangerous command patterns to block before LLM review
+DANGEROUS_PATTERNS = [
+    "rm -rf /",
+    "rm -rf /*",
+    ":(){ :|:& };:",  # Fork bomb
+    "dd if=/dev/zero of=/dev/sda",
+    "mkfs.",
+    "> /dev/sda",
+    "chmod -R 777 /",
+    "chown -R",
+    "wget -O- | sh",
+    "curl | sh",
+    "eval $(base64",
+]
 
 
 class SafetyAgent:
@@ -62,8 +78,8 @@ Respond with EXACTLY this JSON format:
 }}"""
 
     def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(model)
+        self._client = genai.Client(api_key=api_key)
+        self._model_name = model
     
     async def review(self, command: str, context: str = "") -> dict:
         """Review a command for safety.
@@ -71,14 +87,26 @@ Respond with EXACTLY this JSON format:
         Returns:
             Dict with allowed, risk_level, reason, suggested_modification
         """
+        # First check against hardcoded dangerous patterns
+        for pattern in DANGEROUS_PATTERNS:
+            if pattern in command:
+                return {
+                    "allowed": False,
+                    "risk_level": "critical",
+                    "reason": f"Command contains dangerous pattern: {pattern}",
+                    "suggested_modification": None
+                }
+        
         prompt = self.SAFETY_PROMPT.format(command=command, context=context)
         
         try:
-            response = self._model.generate_content(prompt)
+            response = await self._client.aio.models.generate_content(
+                model=self._model_name,
+                contents=prompt
+            )
             text = response.text.strip()
             
             # Parse JSON from response
-            import json
             if text.startswith("```"):
                 lines = text.split("\n")
                 text = "\n".join(lines[1:-1])

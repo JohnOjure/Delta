@@ -62,23 +62,23 @@ class StorageGetCapability(Capability):
         if not key:
             return CapabilityResult.fail("Missing required parameter: key")
         
+        conn = await self._storage._get_connection()
         try:
-            conn = await self._storage._get_connection()
-            async with conn:
-                cursor = await conn.execute(
-                    "SELECT value FROM kv_store WHERE namespace = ? AND key = ?",
-                    (self._namespace, key)
-                )
-                row = await cursor.fetchone()
-                
-                if row is None:
-                    return CapabilityResult.ok(None)
-                
-                value = json.loads(row[0])
-                return CapabilityResult.ok(value)
-                
+            cursor = await conn.execute(
+                "SELECT value FROM kv_store WHERE namespace = ? AND key = ?",
+                (self._namespace, key)
+            )
+            row = await cursor.fetchone()
+            
+            if row is None:
+                return CapabilityResult.ok(None)
+            
+            value = json.loads(row[0])
+            return CapabilityResult.ok(value)
         except Exception as e:
             return CapabilityResult.fail(f"Storage error: {e}")
+        finally:
+            await conn.close()
 
 
 class StorageSetCapability(Capability):
@@ -116,21 +116,21 @@ class StorageSetCapability(Capability):
         except (TypeError, ValueError) as e:
             return CapabilityResult.fail(f"Value is not JSON-serializable: {e}")
         
+        conn = await self._storage._get_connection()
         try:
-            conn = await self._storage._get_connection()
-            async with conn:
-                await conn.execute("""
-                    INSERT INTO kv_store (namespace, key, value, updated_at)
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT (namespace, key) DO UPDATE SET
-                        value = excluded.value,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (self._namespace, key, value_json))
-                await conn.commit()
-                return CapabilityResult.ok(True)
-                
+            await conn.execute("""
+                INSERT INTO kv_store (namespace, key, value, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (namespace, key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (self._namespace, key, value_json))
+            await conn.commit()
+            return CapabilityResult.ok(True)
         except Exception as e:
             return CapabilityResult.fail(f"Storage error: {e}")
+        finally:
+            await conn.close()
 
 
 class StorageDeleteCapability(Capability):
@@ -156,15 +156,15 @@ class StorageDeleteCapability(Capability):
         if not key:
             return CapabilityResult.fail("Missing required parameter: key")
         
+        conn = await self._storage._get_connection()
         try:
-            conn = await self._storage._get_connection()
-            async with conn:
-                cursor = await conn.execute(
-                    "DELETE FROM kv_store WHERE namespace = ? AND key = ?",
-                    (self._namespace, key)
-                )
-                await conn.commit()
-                return CapabilityResult.ok(cursor.rowcount > 0)
-                
+            cursor = await conn.execute(
+                "DELETE FROM kv_store WHERE namespace = ? AND key = ?",
+                (self._namespace, key)
+            )
+            await conn.commit()
+            return CapabilityResult.ok(cursor.rowcount > 0)
         except Exception as e:
             return CapabilityResult.fail(f"Storage error: {e}")
+        finally:
+            await conn.close()

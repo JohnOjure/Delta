@@ -127,6 +127,29 @@ class Sandbox:
         Returns:
             Globals dict with builtins and capabilities
         """
+        # Helper for augmented assignments (+=, -=, etc.)
+        # RestrictedPython transforms "x += y" to "_inplacevar_('+=', x, y)"
+        import operator as _operator
+        _operators = {
+            '+=': _operator.iadd,
+            '-=': _operator.isub,
+            '*=': _operator.imul,
+            '/=': _operator.itruediv,
+            '//=': _operator.ifloordiv,
+            '%=': _operator.imod,
+            '**=': _operator.ipow,
+            '&=': _operator.iand,
+            '|=': _operator.ior,
+            '^=': _operator.ixor,
+            '<<=': _operator.ilshift,
+            '>>=': _operator.irshift,
+        }
+        
+        def _inplacevar_(op, x, y):
+            if op not in _operators:
+                raise SecurityViolation(f"Operation '{op}' is not allowed")
+            return _operators[op](x, y)
+        
         restricted_globals = {
             "__builtins__": self.SAFE_BUILTINS,
             "_getattr_": default_guarded_getattr,
@@ -135,6 +158,7 @@ class Sandbox:
             "_unpack_sequence_": guarded_unpack_sequence,
             "_getiter_": iter,
             "_write_": lambda x: x,  # Allow simple writes
+            "_inplacevar_": _inplacevar_,  # Support +=, -=, etc.
         }
         
         # Add capability bindings

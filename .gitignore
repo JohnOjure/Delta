@@ -1,2 +1,20 @@
-venv/
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Delta Data
+data/
+.delta/
+*.db
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
