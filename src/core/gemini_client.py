@@ -149,6 +149,8 @@ Analyze system metrics and decide if the user needs to be alerted.
                 break
             except Exception as e:
                 error_str = str(e).lower()
+                
+                # Rate Limit Handling (429)
                 if "429" in error_str or "resource" in error_str or "quota" in error_str:
                     if attempt < retries:
                         delay = 60  # Wait 60s as suggested by API
@@ -156,6 +158,31 @@ Analyze system metrics and decide if the user needs to be alerted.
                         await asyncio.sleep(delay)
                     else:
                         raise
+                
+                # Model Not Found Handling (404)
+                elif "404" in error_str and "not found" in error_str and "model" in error_str:
+                    print(f"  ⚠️ Model {use_model} not found/supported. Attempting switch...")
+                    
+                    # Try next available model
+                    available = self.get_available_models()
+                    current_idx = -1
+                    if use_model in available:
+                        current_idx = available.index(use_model)
+                    
+                    next_idx = (current_idx + 1) % len(available)
+                    next_model = available[next_idx]
+                    
+                    # Avoid infinite loop if all fail
+                    if next_model == use_model or attempt >= len(available):
+                        print("  ❌ All models failed.")
+                        raise
+                        
+                    print(f"  🔄 Switching to fallback: {next_model}")
+                    if model is None: # If using default model, update it permanently
+                        self._model_name = next_model
+                    model = next_model # Update for next loop iteration
+                    continue
+                    
                 else:
                     # For other errors, just re-raise
                     raise

@@ -217,8 +217,44 @@ async def main():
         help="Directory for data storage"
     )
     
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Start the Web UI"
+    )
+    
     args = parser.parse_args()
     
+    # Handle Web UI Launch
+    if args.web:
+        try:
+            import uvicorn
+            import webbrowser
+            
+            url = "http://127.0.0.1:8000"
+            print(f"🌐 Starting Delta Web UI at {url}...")
+            
+            # Open browser after a slight delay to ensure server is up
+            async def open_browser():
+                await asyncio.sleep(1.5)
+                webbrowser.open(url)
+                print(f"👉 Interface opened in default browser.")
+            
+            # We can't easily await inside this synchronous block before run, 
+            # but we can schedule it if we had an event loop, or just fire and forget in a thread,
+            # or simply open it before uvicorn blocks (it might fail if server isn't ready, but usually browser retries or is slow enough)
+            
+            # Simpler approach: threaded timer
+            from threading import Timer
+            Timer(1.5, lambda: webbrowser.open(url)).start()
+            
+            uvicorn.run("src.web.server:app", host="127.0.0.1", port=8000, log_level="info")
+            return
+        except ImportError:
+            print("❌ Error: Web dependencies not installed.")
+            print("Run: pip install fastapi uvicorn websockets")
+            sys.exit(1)
+            
     # Ensure configuration
     config = ensure_config()
     
@@ -269,6 +305,12 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nGoodbye!")
+        print("\n👋 Goodbye!")
         sys.exit(0)
+    except Exception as e:
+        print(f"\n❌ Fatal Error: {e}")
+        # Only print traceback if debug mode or specifically requested
+        # import traceback
+        # traceback.print_exc()
+        sys.exit(1)
 

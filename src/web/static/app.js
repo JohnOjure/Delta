@@ -29,6 +29,7 @@ class DeltaChat {
         this.connectWebSocket();
         this.bindEvents();
         this.loadStats();
+        this.bindSettingsEvents();
         this.autoResizeInput();
     }
 
@@ -432,6 +433,91 @@ class DeltaChat {
             this.elements.extCount.textContent = (stats.extensions || 0) + ' Extensions';
         } catch (e) {
             console.error('Failed to load stats:', e);
+        }
+    }
+
+    bindSettingsEvents() {
+        const modal = document.getElementById('settings-modal');
+        const settingsBtn = document.getElementById('settings-btn');
+        const closeBtn = document.getElementById('close-settings');
+        const saveBtn = document.getElementById('save-settings');
+
+        // Open
+        if (settingsBtn) {
+            settingsBtn.onclick = () => {
+                this.loadSettings();
+                modal.classList.remove('hidden');
+            };
+        }
+
+        // Close
+        if (closeBtn) {
+            closeBtn.onclick = () => modal.classList.add('hidden');
+        }
+
+        // Close on outside click
+        window.onclick = (e) => {
+            if (e.target === modal) {
+                modal.classList.add('hidden');
+            }
+        };
+
+        // Save
+        if (saveBtn) {
+            saveBtn.onclick = () => this.saveSettings();
+        }
+    }
+
+    async loadSettings() {
+        try {
+            const res = await fetch('/api/config');
+            const config = await res.json();
+
+            document.getElementById('setting-name').value = config.user_name || '';
+            document.getElementById('setting-model').value = config.model_name || 'gemini-1.5-flash';
+            document.getElementById('setting-api-key').value = config.api_key || '';
+            document.getElementById('setting-voice').checked = config.voice_enabled || false;
+            document.getElementById('setting-limit').value = config.usage_limit || 100;
+        } catch (e) {
+            console.error('Failed to load settings:', e);
+            alert('Failed to load settings.');
+        }
+    }
+
+    async saveSettings() {
+        const btn = document.getElementById('save-settings');
+        const originalText = btn.textContent;
+        btn.textContent = 'Saving...';
+        btn.disabled = true;
+
+        const config = {
+            user_name: document.getElementById('setting-name').value,
+            model_name: document.getElementById('setting-model').value,
+            api_key: document.getElementById('setting-api-key').value,
+            voice_enabled: document.getElementById('setting-voice').checked,
+            usage_limit: document.getElementById('setting-limit').value
+        };
+
+        try {
+            const res = await fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            const result = await res.json();
+
+            if (result.success) {
+                document.getElementById('settings-modal').classList.add('hidden');
+                // Optional: alert('Settings saved!');
+            } else {
+                alert('Error saving settings: ' + result.message);
+            }
+        } catch (e) {
+            console.error('Failed to save settings:', e);
+            alert('Failed to save settings.');
+        } finally {
+            btn.textContent = originalText;
+            btn.disabled = false;
         }
     }
 

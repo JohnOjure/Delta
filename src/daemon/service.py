@@ -126,6 +126,10 @@ class DeltaService:
         except ImportError:
             self._log("Voice listener not available (speech_recognition not installed)")
         
+        # Start Heartbeat (Periodic Checks)
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        tasks.append(self._heartbeat_task)
+        
         self._log("Delta service started. Listening for commands...")
         
         # Wait for all tasks
@@ -133,6 +137,50 @@ class DeltaService:
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             pass
+            
+    async def _ensure_heartbeat_file(self):
+        """Ensure HEARTBEAT.md exists."""
+        hb_path = self.data_dir / "HEARTBEAT.md"
+        if not hb_path.exists():
+            hb_path.write_text("""# System Heartbeat Instructions
+# Delta will run this checklist every 30 minutes.
+
+1. Check system disk space. If free space is below 5GB, alert me.
+2. Check memory usage. If critical (>90%), alert me.
+3. Review my todo list in `~/todo.md` (if it exists) and remind me of urgent items.
+""")
+        return hb_path
+
+    async def _heartbeat_loop(self):
+        """Periodic heartbeat to run agent proactive checks."""
+        hb_path = await self._ensure_heartbeat_file()
+        
+        while self.running:
+            try:
+                # Run every 30 minutes
+                # For demo/debug purposes, we might want to trigger it on startup?
+                # Let's wait 1 minute after start, then every 30m
+                await asyncio.sleep(60) 
+                
+                if not self.running: break
+                
+                instructions = hb_path.read_text()
+                if not instructions.strip():
+                    continue
+                    
+                self._log("💓 Running Heartbeat check...")
+                
+                # Check active hours (simple logic for now: 8am-10pm)
+                current_hour = datetime.now().hour
+                if 8 <= current_hour <= 22:
+                     await self.run_goal(f"[SYSTEM HEARTBEAT] Follow these instructions: {instructions}\n\nOnly report CRITICAL issues.")
+                
+                await asyncio.sleep(1800) # 30 minutes
+                
+            except Exception as e:
+                self._log(f"Heartbeat error: {e}")
+                await asyncio.sleep(60) # Retry in 1 min
+
     
     async def stop(self):
         """Stop the daemon service."""

@@ -135,6 +135,21 @@ class Agent:
             env_info = self._adapter.get_environment_info()
             env_str = env_info.to_prompt_string()
             
+            # Inject Persistent Memory (Soul & User)
+            if self._memory:
+                try:
+                    await self._memory.ensure_persistent_files()
+                    soul = await self._memory.get_identity()
+                    user = await self._memory.get_user_profile()
+                    
+                    if soul:
+                        env_str += f"\n\n## Agent Identity (SOUL)\n{soul}"
+                    if user:
+                        env_str += f"\n\n## User Context\n{user}"
+                        
+                except Exception as e:
+                    print(f"  [Memory] Failed to load persistent context: {e}")
+            
             # Get existing extensions
             extensions = await self._registry.list_all()
             ext_str = "\n".join(e.to_prompt_string() for e in extensions) or "None"

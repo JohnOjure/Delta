@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Delta Agent
+Comment=AI Agent Web Interface
+Exec=bash -c "cd %PWD% && ./venv/bin/python3 main.py --web"
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=Utility;AI;

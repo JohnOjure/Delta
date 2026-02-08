@@ -230,6 +230,50 @@ async def get_stats():
     }
 
 
+@app.get("/api/config")
+async def get_config_endpoint():
+    """Get current configuration."""
+    config_mgr = get_config()
+    # Return as dict, hiding full API key for security if needed, 
+    # but user needs to see it to edit it usually. 
+    # Let's show it since it's local.
+    return {
+        "user_name": config_mgr.user_name,
+        "model_name": config_mgr.model_name,
+        "api_key": config_mgr.api_key,
+        "usage_limit": config_mgr.usage_limit,
+        "voice_enabled": config_mgr.voice_enabled
+    }
+
+
+@app.post("/api/config")
+async def update_config_endpoint(start_config: dict):
+    """Update configuration."""
+    from src.core.config import ConfigManager
+    
+    manager = ConfigManager()
+    manager.load()
+    
+    updates = {}
+    if "user_name" in start_config: updates["user_name"] = start_config["user_name"]
+    if "model_name" in start_config: updates["model_name"] = start_config["model_name"]
+    if "api_key" in start_config: updates["api_key"] = start_config["api_key"]
+    if "usage_limit" in start_config: updates["usage_limit"] = int(start_config["usage_limit"])
+    if "voice_enabled" in start_config: updates["voice_enabled"] = bool(start_config["voice_enabled"])
+    
+    manager.update(**updates)
+    
+    global _agent, _adapter
+    # If API key or Model changed, we might need to re-init agent components
+    # For now, simplest is to ask user to restart, or we can hot-reload if careful.
+    # Hot reload agent:
+    if "api_key" in updates or "model_name" in updates:
+        _agent = None # Force re-creation on next get_agent()
+        _adapter = None
+        
+    return {"success": True, "message": "Configuration updated"}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time agent updates."""

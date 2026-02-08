@@ -343,3 +343,63 @@ class Memory:
             }
         finally:
             await conn.close()
+    async def ensure_persistent_files(self) -> None:
+        """Ensure SOUL.md and USER.md exist."""
+        data_dir = self._db_path.parent
+        soul_path = data_dir / "SOUL.md"
+        user_path = data_dir / "USER.md"
+        
+        if not soul_path.exists():
+            soul_path.write_text("""# Delta's Soul
+## Core Identity
+I am Delta, an advanced AI agent focused on precision and autonomy.
+I am running locally on the user's system.
+
+## Communication Style
+- Professional but approachable
+- Concise and action-oriented
+- I prefer to do rather than explain
+- I use emojis sparingly to indicate status (✅, ❌, ⚠️)
+
+## Directives
+1. Serve the user's goals securely and efficiently.
+2. Maintain system stability.
+3. Learn from mistakes.
+""")
+            
+        if not user_path.exists():
+            user_path.write_text("""# User Profile
+## Facts
+- Name: Fluxx
+- Role: Administrator
+
+## Preferences
+- prefers_concise_responses: true
+- auto_approval_threshold: low
+""")
+
+    async def get_identity(self) -> str:
+        """Get agent's identity from SOUL.md."""
+        data_dir = self._db_path.parent
+        soul_path = data_dir / "SOUL.md"
+        if soul_path.exists():
+            return soul_path.read_text()
+        return ""
+
+    async def get_user_profile(self) -> str:
+        """Get user profile from USER.md."""
+        data_dir = self._db_path.parent
+        user_path = data_dir / "USER.md"
+        if user_path.exists():
+            return user_path.read_text()
+        return ""
+
+    async def update_user_profile(self, fact: str) -> None:
+        """Add a fact to USER.md."""
+        data_dir = self._db_path.parent
+        user_path = data_dir / "USER.md"
+        if user_path.exists():
+            current = user_path.read_text()
+            if fact not in current:
+                with open(user_path, "a") as f:
+                    f.write(f"\n- {fact}")

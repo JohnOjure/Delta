@@ -79,3 +79,38 @@ delta config --api-key YOUR_NEW_KEY
 
 -   **"Model not found"**: Delta should auto-switch, but you can manually set a different model via `delta config`.
 -   **Permission errors**: Ensure you have read/write access to the `data/` directory.
+
+---
+
+## 🚀 Easy Mode (Desktop Launcher)
+For non-technical users, you can create a desktop shortcut:
+
+1. Run the installer script:
+   ```bash
+   chmod +x install.sh
+   ./install.sh
+   ```
+2. Look for "Delta Agent" in your applications menu. 
+3. Click it to launch the Web Interface automatically!
+
+## 💬 Web Interface ("Chat Spot")
+Delta comes with a modern, dark-themed web interface.
+
+1. Start the web server:
+   ```bash
+   python main.py --web
+   ```
+2. Open your browser to: http://127.0.0.1:8000
+
+## 🎙️ Voice Mode
+You can talk to Delta if you have a microphone!
+
+1. Ensure voice dependencies are installed:
+   ```bash
+   pip install SpeechRecognition pyaudio
+   ```
+2. Enable voice in configuration:
+   ```bash
+   # Add "voice_enabled": true to ~/.delta/config.json
+   ```
+   *Currently, voice listens for "Hey Delta" when the daemon is running.*

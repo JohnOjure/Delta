@@ -14,23 +14,53 @@ class ExtensionGenerator:
     def __init__(self):
         self._sandbox = Sandbox()
     
-    def parse_generation(self, llm_response: dict) -> tuple[ExtensionMetadata, str]:
+    def parse_generation(self, llm_response: str | dict) -> tuple[ExtensionMetadata, str]:
         """Parse LLM code generation response.
         
         Args:
-            llm_response: Dict with name, description, code, etc.
+            llm_response: Dict with fields OR raw string with markdown blocks
             
         Returns:
             Tuple of (ExtensionMetadata, source_code)
         """
-        name = llm_response.get("name", "unnamed_extension")
-        description = llm_response.get("description", "No description")
-        version = llm_response.get("version", "1.0.0")
-        tags = llm_response.get("tags", [])
-        code = llm_response.get("code", "")
+        import json
+        import re
         
-        # Extract required capabilities from code
-        required_caps = self._extract_capabilities_from_code(code)
+        data = {}
+        
+        if isinstance(llm_response, str):
+            # Parse raw string with markdown blocks
+            # 1. Extract JSON block
+            json_match = re.search(r"```json\n(.*?)\n```", llm_response, re.DOTALL)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group(1))
+                except json.JSONDecodeError:
+                    print("Error decoding JSON from extension generation")
+            
+            # 2. Extract Python block
+            code_match = re.search(r"```python\n(.*?)\n```", llm_response, re.DOTALL)
+            if code_match:
+                data["code"] = code_match.group(1)
+            else:
+                # Fallback: look for generic block if only one
+                code_match = re.search(r"```\n(.*?)\n```", llm_response, re.DOTALL)
+                if code_match and "code" not in data:
+                    data["code"] = code_match.group(1)
+        else:
+            data = llm_response
+            
+        name = data.get("name", "unnamed_extension")
+        description = data.get("description", "No description")
+        version = data.get("version", "1.0.0")
+        tags = data.get("tags", [])
+        code = data.get("code", "")
+        
+        # Extract required capabilities from code if not provided
+        if not data.get("required_capabilities"):
+             required_caps = self._extract_capabilities_from_code(code)
+        else:
+             required_caps = data.get("required_capabilities")
         
         metadata = ExtensionMetadata(
             name=name,

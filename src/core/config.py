@@ -59,7 +59,7 @@ class ConfigManager:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         
         with open(self.config_path, "w") as f:
-            f.write(config.json(indent=2))
+            f.write(config.model_dump_json(indent=2))
         
         self._config = config
         
