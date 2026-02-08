@@ -117,14 +117,9 @@ class DeltaChat {
             });
         }
 
-        // Vision (Screenshot)
-        const cameraBtn = document.getElementById('camera-btn');
-        if (cameraBtn) {
-            cameraBtn.addEventListener('click', () => {
-                this.elements.messageInput.value = "[Analyze my screen]";
-                this.sendMessage();
-            });
-        }
+        // Note: Vision/Screenshot feature removed - Delta is a system agent,
+        // not a browser-based chatbot. Screen analysis should be done via
+        // system-level screenshot capabilities, not browser context.
     }
 
     speak(text) {
@@ -221,7 +216,7 @@ class DeltaChat {
 
             case 'error':
                 this.showTyping(false);
-                this.addMessage('agent', `Error: ${data.message}`, 'error');
+                this.addMessage('agent', `Error: ${data.error || data.message || 'Unknown error'}`, 'error');
                 this.setRunning(false);
                 break;
         }
@@ -434,7 +429,7 @@ class DeltaChat {
         try {
             const response = await fetch('/api/stats');
             const stats = await response.json();
-            this.elements.extCount.textContent = stats.extensions || 0;
+            this.elements.extCount.textContent = (stats.extensions || 0) + ' Extensions';
         } catch (e) {
             console.error('Failed to load stats:', e);
         }

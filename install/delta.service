@@ -1,0 +1,15 @@
+[Unit]
+Description=Delta AI Agent Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+ExecStart=/usr/bin/python3 -m src.daemon.service
+WorkingDirectory=%h/Workspace/Delta
+Environment=PYTHONPATH=%h/Workspace/Delta
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

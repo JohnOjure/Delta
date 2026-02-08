@@ -28,15 +28,67 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def get_api_key() -> str:
-    """Get Gemini API key from environment or prompt."""
-    key = os.getenv("GEMINI_API_KEY")
-    if not key:
-        key = input("Enter your Gemini API key: ").strip()
-        if not key:
-            print("Error: API key required")
-            sys.exit(1)
-    return key
+from src.core.config import ConfigManager, UserConfig
+
+def ensure_config() -> UserConfig:
+    """Ensure configuration exists, or run interactive wizard."""
+    manager = ConfigManager()
+    config = manager.load()
+    
+    if config and config.api_key:
+        return config
+        
+    print("\n👋 Welcome to Delta Agent! Let's get you set up.\n")
+    
+    # Interactive Setup Wizard
+    print("1. API Authorization")
+    print("   We need a Google Gemini API key to power Delta's intelligence.")
+    print("   Get one here: https://aistudio.google.com/app/apikey")
+    
+    while True:
+        api_key = input("   Enter your API Key: ").strip()
+        if api_key:
+            break
+        print("   ❌ API Key is required.")
+        
+    print("\n2. Personalization")
+    name = input("   What should I call you? [User]: ").strip() or "User"
+    
+    print("\n3. Model Selection")
+    print("   Select the default AI model to use:")
+    print("   1) gemini-1.5-flash (Fast, efficient, lower cost)")
+    print("   2) gemini-1.5-pro   (More distinct reasoning, higher cost)")
+    print("   3) gemini-2.0-flash (Newest, fastest)")
+    
+    model_choice = input("   Choose [1-3] (default: 1): ").strip()
+    model_map = {
+        "1": "gemini-1.5-flash",
+        "2": "gemini-1.5-pro",
+        "3": "gemini-2.0-flash"
+    }
+    model_name = model_map.get(model_choice, "gemini-1.5-flash")
+    
+    print("\n4. Safety & Limits")
+    limit_input = input("   Daily request limit (default: 100): ").strip()
+    try:
+        usage_limit = int(limit_input) if limit_input else 100
+    except ValueError:
+        usage_limit = 100
+        
+    # Create and save config
+    config = UserConfig(
+        api_key=api_key,
+        user_name=name,
+        model_name=model_name,
+        usage_limit=usage_limit
+    )
+    
+    manager.save(config)
+    print(f"\n✅ Setup complete! Configuration saved to {manager.config_path}")
+    print("   You can change these settings later with 'python main.py --config'")
+    print("-" * 50 + "\n")
+    
+    return config
 
 
 async def run_goal(agent: Agent, goal: str):
@@ -49,7 +101,12 @@ async def run_goal(agent: Agent, goal: str):
     else:
         print("❌ FAILED")
     
-    print(f"Message: {result.message}")
+    # Show the actual response/answer if available
+    if result.response:
+        print(f"\n{result.response}\n")
+    else:
+        print(f"Message: {result.message}")
+    
     print(f"Steps taken: {result.steps_taken}")
     
     if result.extensions_created:
@@ -162,24 +219,26 @@ async def main():
     
     args = parser.parse_args()
     
-    # Get API key
-    api_key = get_api_key()
+    # Ensure configuration
+    config = ensure_config()
     
     # Set up components
     data_dir = Path(args.data_dir).resolve()
     
     print(f"📁 Data directory: {data_dir}")
+    print(f"👤 User: {config.user_name}")
+    print(f"🧠 Model: {config.model_name}")
     
     # Create adapter
     adapter = DesktopAdapter(
-        api_key=api_key,
+        api_key=config.api_key,
         working_directory=Path.cwd(),
         data_directory=data_dir
     )
     await adapter.initialize()
     
     # Create Gemini client
-    gemini = GeminiClient(api_key)
+    gemini = GeminiClient(config.api_key, model=config.model_name)
     
     # Create extension registry
     registry = ExtensionRegistry(data_dir / "extensions.db")

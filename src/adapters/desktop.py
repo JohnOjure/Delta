@@ -98,12 +98,15 @@ class DesktopAdapter(BaseAdapter):
             # Storage
             "storage.get": StorageGetCapability(self._storage),
             "storage.set": StorageSetCapability(self._storage),
-
             "storage.delete": StorageDeleteCapability(self._storage),
-            
-            # Vision
-            "vision.capture_screen": VisionCapability(),
         }
+        
+        # Vision capability (optional - requires mss)
+        try:
+            from src.capabilities.vision import VisionCapability
+            self._capabilities["vision.capture_screen"] = VisionCapability()
+        except ImportError:
+            pass  # mss not installed
         
         # Shell capabilities (if enabled)
         if self._enable_shell:

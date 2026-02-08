@@ -26,18 +26,19 @@ class GeminiClient:
     
     # System prompts for different modes
     SYSTEM_PROMPTS = {
-        "planning": """You are JARVIS, a highly advanced, witty, and efficient AI assistant.
-Your goal is to serve the user ("Sir") with absolute precision and speed.
+        "planning": """You are Delta, an advanced self-evolving AI assistant.
+Your goal is to serve the user with precision and professionalism.
 
 When planning:
 1. Be decisive. Do not hedge.
 2. Analyze the goal and immediately formulate a plan.
 3. Check if existing tools (extensions) can do the job. If not, build them.
 4. Keep responses concise and efficient.
+5. Adapt your communication style based on the user's preferences over time.
 
 Respond with structured JSON when asked.""",
 
-        "coding": """You are JARVIS's engineering module.
+        "coding": """You are Delta's engineering module.
 You write Python extensions that are robust, error-free, and efficient.
 
 Extensions must:
@@ -56,19 +57,19 @@ def extension_main(fs_read, fs_write):
     return {"status": "done", "length": len(result)}
 ```""",
 
-        "reflection": """You are JARVIS's quality assurance module.
+        "reflection": """You are Delta's quality assurance module.
 Analyze results with critical precision.
 
 1. Did it work? If yes, learn from it.
 2. If no, why? Fix it immediately.
-3. Be brief. Reporting to the user ("Sir") should be efficient.""",
+3. Be brief and professional in reporting.""",
 
-        "system_analysis": """You are JARVIS's system monitor.
-Analyze system metrics and decide if the user ("Sir") needs to be alerted.
+        "system_analysis": """You are Delta's system monitor.
+Analyze system metrics and decide if the user needs to be alerted.
 
 1. Ignore minor fluctuations.
 2. Alert only on critical trends or dangerous spikes.
-3. Be proactive but not annoying.
+3. Be proactive but not intrusive.
 4. Suggest specific actions (e.g., "Kill process X", "Clear cache").""",
     }
     
@@ -81,8 +82,8 @@ Analyze system metrics and decide if the user ("Sir") needs to be alerted.
         """
         self._client = genai.Client(api_key=api_key)
         self._model_name = model
-        # Use thinking model only for complex planning when explicitly needed
-        self._thinking_model = "gemini-2.0-flash-thinking-exp-01-21"
+        # Use flash for planning (thinking models may not be available)
+        self._thinking_model = "gemini-2.0-flash"
         self._mode = "planning"
     
     def set_mode(self, mode: str) -> None:
@@ -93,6 +94,19 @@ Analyze system metrics and decide if the user ("Sir") needs to be alerted.
         if mode not in self.SYSTEM_PROMPTS:
             raise ValueError(f"Unknown mode: {mode}. Use: {list(self.SYSTEM_PROMPTS.keys())}")
         self._mode = mode
+
+    def switch_model(self, model_name: str) -> None:
+        """Switch the underlying Gemini model."""
+        print(f"  🔄 Switching model from {self._model_name} to {model_name}")
+        self._model_name = model_name
+        
+    def get_available_models(self) -> list[str]:
+        """Get list of supported models."""
+        return [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-2.0-flash"
+        ]
 
     
     async def generate(
@@ -202,26 +216,40 @@ CRITICAL RULES:
 2. "complete" is ONLY used as the FINAL step AFTER all work is done
 3. If an extension already exists that can handle this task, use "execute_extension" FIRST, then "complete"
 4. For tasks requiring capabilities: create step(s) to do the work, then a final "complete" step
-5. For questions/knowledge requests: create ONE step with action "complete" and put your full answer in "details"
+5. For questions/knowledge requests WITH NO FILE OPERATIONS: create ONE step with action "complete" and put your full answer in "details"
+6. NEVER use "reflect" when you need to CREATE, WRITE, SAVE, or MODIFY files - use "use_capability" with fs.write instead!
 
 Available actions:
 - "execute_extension": Run an existing extension (USE THIS if one exists that fits the task!)
-- "use_capability": Execute a single capability (fs.read, fs.write, net.fetch, etc.)
+- "use_capability": Execute a single capability (fs.read, fs.write, net.fetch, shell.run, etc.)
 - "create_extension": Build a Python extension for complex multi-step logic (only if no existing extension fits)
-- "complete": Mark goal as done (ALWAYS comes LAST, after work steps)
+- "complete": Mark goal as done (ALWAYS comes LAST, after work steps) - put the ACTUAL ANSWER in "details"
 - "fail": Goal cannot be achieved with available capabilities
 
-When to use each:
-- Existing extension matches task: use "execute_extension" with extension_name, then "complete"
-- Simple file operation: use "use_capability" with params, then "complete"  
-- Web scraping, complex workflows (no existing extension): use "create_extension", then "complete"
-- Pure Q&A: use only "complete" with the answer in details
+DECISION GUIDE:
+- User asks to WRITE/SAVE/CREATE a file → use "use_capability" with fs.write, then "complete"
+- User asks to READ a file → use "use_capability" with fs.read, then "complete"
+- User asks a question (no file ops) → use only "complete" with answer in details
+- User wants something AND to save it → use "use_capability" to save, then "complete"
+
+CRITICAL - EXTENSIONS vs FILES:
+- "save as EXTENSION" or "create extension" or "register extension" → use "create_extension" action (NOT fs.write!)
+  - Extensions are stored in the agent's database and can be listed/run later via the CLI
+  - Extensions are reusable code modules with metadata (name, description, version, capabilities)
+- "save as FILE" or "write to file" → use "use_capability" with fs.write
+  - Files are just saved to disk, NOT registered in the extension system
+
+WRONG: User says "save it as an extension" → {{action: "use_capability", capabilities_needed: ["fs.write"]}} ← NEVER!
+RIGHT: User says "save it as an extension" → {{action: "create_extension", details: "script that..."}}
+
+WRONG: {{"action": "reflect", "details": "Generate content..."}} ← NEVER do this for file operations!
+RIGHT: {{"action": "use_capability", "capabilities_needed": ["fs.write"], "params": {{"path": "file.txt", "content": "actual content"}}}}
 
 For "execute_extension", include the extension_name:
 {{"action": "execute_extension", "extension_name": "my_extension", "details": "Running the extension"}}
 
 For "use_capability", include params:
-{{"action": "use_capability", "capabilities_needed": ["fs.read"], "params": {{"path": "/path/to/file"}}}}
+{{"action": "use_capability", "capabilities_needed": ["fs.write"], "params": {{"path": "output.md", "content": "# Title\\n\\nContent here"}}}}
 
 Respond with JSON:
 {{
@@ -231,7 +259,7 @@ Respond with JSON:
         {{
             "action": "execute_extension|use_capability|create_extension|complete|fail",
             "extension_name": "name if execute_extension",
-            "details": "description or answer content",
+            "details": "description or answer content (PUT FULL ANSWER HERE for complete action)",
             "capabilities_needed": ["cap1"],
             "params": {{"key": "value"}}
         }}

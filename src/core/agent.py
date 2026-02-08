@@ -166,11 +166,34 @@ class Agent:
                 if learnings_str:
                     context_ext_str = ext_str + "\n" + learnings_str
                 
-                plan_response = await self._gemini.plan(goal, env_str, context_ext_str)
-                plan = self._planner.parse_plan(plan_response)
+                try:
+                    plan_response = await self._gemini.plan(goal, env_str, context_ext_str)
+                    plan = self._planner.parse_plan(plan_response)
+                except Exception as e:
+                    # Intelligent Model Switching
+                    error_str = str(e).lower()
+                    if "404" in error_str or "not found" in error_str or "429" in error_str or "resource" in error_str:
+                        print(f"  ⚠️ Model Error: {e}")
+                        
+                        current_model = self._gemini._model_name
+                        available = self._gemini.get_available_models()
+                        
+                        # Find next model
+                        if current_model in available:
+                            idx = available.index(current_model)
+                            next_idx = (idx + 1) % len(available)
+                            next_model = available[next_idx]
+                            
+                            # Auto-switch
+                            print(f"  🤖 Auto-Switching to {next_model} to recover...")
+                            await self._emit_status("Recovering", f"Switching to {next_model}")
+                            self._gemini.switch_model(next_model)
+                            continue 
+                        
+                    raise e
                 
                 print(f"  Plan: {plan.analysis[:100]}...")
-                await self._emit_status("Planning", plan.analysis[:150])
+                await self._emit_status("Planning", plan.analysis[:500])
                 
                 # 2. Execute each step
                 for step in plan.steps:
@@ -178,10 +201,13 @@ class Agent:
                     
                     if step.action == ActionType.COMPLETE:
                         print("  Goal completed.")
+                        # For Q&A, the actual answer is in step.details (per planning prompt)
+                        # Only fall back to analysis if details is empty or generic
+                        answer = step.details if step.details and step.details not in ["Goal accomplished", ""] else plan.analysis
                         return AgentResult(
                             success=True,
-                            message=step.details or "Goal accomplished",
-                            response=plan.analysis,
+                            message="Goal accomplished",
+                            response=answer,
                             extensions_created=extensions_created,
                             steps_taken=self._iteration
                         )

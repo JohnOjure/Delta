@@ -46,15 +46,18 @@ body {
     font-family: var(--font-sans);
     background: var(--bg-primary);
     color: var(--text-primary);
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
     line-height: 1.6;
     letter-spacing: -0.01em;
 }
 
 /* App Layout */
+/* App Layout */
 .app {
     display: flex;
-    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
 }
 
 /* Sidebar */
@@ -81,9 +84,6 @@ body {
     font-size: 1.5rem;
     color: var(--text-primary);
     font-weight: 600;
-    background: linear-gradient(135deg, #4da6ff 0%, #9cb6ff 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
 }
 
 .logo-text {
@@ -212,9 +212,7 @@ body {
 .welcome-icon {
     font-size: 3rem;
     margin-bottom: 1rem;
-    background: linear-gradient(135deg, #4da6ff 0%, #a388ee 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--text-primary);
 }
 
 .welcome-screen h1 {
