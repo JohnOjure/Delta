@@ -67,7 +67,10 @@ class DeltaService:
             await adapter.initialize()
             
             # Initialize agent
-            gemini = GeminiClient(self.config.api.gemini_api_key)
+            gemini = GeminiClient(
+                api_key=self.config.api.gemini_api_key,
+                model=self.config.api.gemini_model
+            )
             registry = ExtensionRegistry(self.config.paths.extensions_db)
             memory = Memory(self.config.paths.data_dir / "memory.db")
             
@@ -76,7 +79,7 @@ class DeltaService:
             # Initialize Ghost Mode
             self._ghost = GhostMode(self._agent, interval=60)
             
-            self._log("Delta service initialized successfully")
+            self._log(f"Delta service initialized with model: {self.config.api.gemini_model}")
             return True
             
         except Exception as e:

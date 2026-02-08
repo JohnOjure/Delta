@@ -17,12 +17,12 @@ DEFAULT_CONFIG_PATH = DEFAULT_CONFIG_DIR / "config.json"
 class UserConfig(BaseModel):
     """User configuration model."""
     api_key: str = Field(..., description="Gemini API Key")
-    model_name: str = Field(default="gemini-1.5-flash", description="Preferred Gemini model")
+    model_name: str = Field(default="gemini-3-pro-preview", description="Preferred Gemini model")
     user_name: str = Field(default="User", description="User's preferred name")
     usage_limit: int = Field(default=100, description="Daily request limit")
     
     # Advanced settings
-    auto_switch_model: bool = Field(default=True, description="Automatically switch models on failure")
+    auto_switch_model: bool = Field(default=False, description="Automatically switch models on failure")
     voice_enabled: bool = Field(default=False, description="Enable voice output by default")
 
 
