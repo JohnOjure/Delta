@@ -167,9 +167,15 @@ class Agent:
                 except Exception as e:
                     print(f"  [Memory] Failed to retrieve learnings: {e}")
             
-            while self._iteration < self._max_iterations:
+            # Intelligent Adaptive Loop
+            # We set a high safety limit, but the real control comes from the agent's decisions
+            # and the user's ability to stop it.
+            safety_limit = 1000  # Effectively infinite for most tasks
+            consecutive_failures = 0
+            
+            while self._iteration < safety_limit:
                 self._iteration += 1
-                print(f"[Iteration {self._iteration}/{self._max_iterations}]")
+                print(f"[Iteration {self._iteration}]")
                 
                 # 1. Plan
                 self._state = AgentState.PLANNING
@@ -231,6 +237,34 @@ class Agent:
                     elif step.action == ActionType.FAIL:
                         print(f"  Cannot complete: {step.details}")
                         await self._emit_status("Failed", step.details)
+                        
+                        # Intelligent Failure Recovery
+                        consecutive_failures += 1
+                        if consecutive_failures >= 3:
+                            # If we're stuck in a loop of failures, ask for help
+                            return AgentResult(
+                                success=False,
+                                message=f"Stuck after {consecutive_failures} consecutive failures: {step.details}",
+                                response=plan.analysis,
+                                extensions_created=extensions_created,
+                                steps_taken=self._iteration
+                            )
+                        
+                        # Ask for alternatives
+                        alternatives = await self._gemini.suggest_alternatives(
+                            original_goal=goal,
+                            failed_approach=step.details,
+                            errors_encountered=[step.details]
+                        )
+                        
+                        if alternatives.get("can_auto_try") and alternatives.get("recommended"):
+                            print(f"  [Auto-Recovery] Trying alternative: {alternatives['recommended']}")
+                            await self._emit_status("Recovering", f"Trying alternative: {alternatives['recommended']}")
+                            # Continue loop, next planning phase will use this context
+                            # We inject the alternative as a "learning" for the next plan
+                            learnings_str += f"\n- Alternative approach suggested: {alternatives['recommended']}\n"
+                            continue
+                        
                         return AgentResult(
                             success=False,
                             message=step.details,
@@ -251,7 +285,7 @@ class Agent:
                             if c.name in caps
                         )
                         
-                        max_attempts = 15
+                        max_attempts = 30  # Increased persistence
                         attempt = 0
                         extension_valid = False
                         all_errors = []  # Track all errors for learning
@@ -539,7 +573,7 @@ Make sure to:
             # Max iterations reached
             return AgentResult(
                 success=False,
-                message=f"Max iterations ({self._max_iterations}) reached",
+                message=f"Safety limit ({safety_limit} iterations) reached. Task unusually long.",
                 extensions_created=extensions_created,
                 steps_taken=self._iteration
             )

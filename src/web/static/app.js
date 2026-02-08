@@ -271,11 +271,11 @@ class DeltaApp {
 
         // Find or create current thinking process block
         let currentProcess = this.elements.messages.querySelector('.thinking-process.active');
-        
+
         if (!currentProcess) {
             // Create new thinking block
             currentProcess = document.createElement('div');
-            currentProcess.className = 'thinking-process active expanded'; // Default expanded
+            currentProcess.className = 'thinking-process active expanded';
             currentProcess.innerHTML = `
                 <div class="thinking-header">
                     <div class="thinking-title">
@@ -286,9 +286,15 @@ class DeltaApp {
                 </div>
                 <div class="thinking-logs">
                     <div class="log-list"></div>
+                    <div class="working-indicator">
+                        <div class="thinking-dots">
+                            <span></span><span></span><span></span>
+                        </div>
+                        <span class="working-text">Thinking...</span>
+                    </div>
                 </div>
             `;
-            
+
             // Toggle Logic
             currentProcess.querySelector('.thinking-header').onclick = () => {
                 currentProcess.classList.toggle('expanded');
@@ -306,7 +312,7 @@ class DeltaApp {
         if (details) {
             const logList = currentProcess.querySelector('.log-list');
             const logItem = document.createElement('div');
-            
+
             // Detect type based on keywords
             let type = 'default';
             if (details.toLowerCase().includes('error') || details.toLowerCase().includes('fail')) type = 'error';
@@ -319,9 +325,9 @@ class DeltaApp {
                 <span class="timestamp">[${timestamp}]</span>
                 <span class="content">${this.escapeHtml(details)}</span>
             `;
-            
+
             logList.appendChild(logItem);
-            
+
             // Auto-scroll logs
             const logsContainer = currentProcess.querySelector('.thinking-logs');
             logsContainer.scrollTop = logsContainer.scrollHeight;
@@ -340,6 +346,13 @@ class DeltaApp {
         const currentProcess = this.elements.messages.querySelector('.thinking-process.active');
         if (currentProcess) {
             currentProcess.classList.remove('active');
+
+            // Hide working indicator
+            const workingIndicator = currentProcess.querySelector('.working-indicator');
+            if (workingIndicator) {
+                workingIndicator.classList.add('hidden');
+            }
+
             const spinner = currentProcess.querySelector('.thinking-spinner');
             if (spinner) {
                 spinner.style.border = 'none';
@@ -351,8 +364,6 @@ class DeltaApp {
                 spinner.style.justifyContent = 'center';
                 spinner.style.fontWeight = 'bold';
             }
-            // Auto collapse on finish after a delay? Maybe keep expanded for review.
-            // currentProcess.classList.remove('expanded'); 
         }
     }
 

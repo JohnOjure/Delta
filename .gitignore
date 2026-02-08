@@ -10,6 +10,8 @@ data/
 .delta/
 *.db
 *.log
+*.pid
+*.lock
 
 # IDE
 .vscode/
