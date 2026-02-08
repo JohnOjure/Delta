@@ -115,26 +115,59 @@ class Executor:
         source_code: str,
         bindings: dict[str, Any]
     ) -> Any:
-        """Execute code with a timeout.
+        """Execute code with a timeout using process isolation.
         
-        Uses asyncio timeout for cooperative limiting.
-        Note: This won't stop truly blocking code - for that we'd need
-        subprocess isolation (future enhancement).
+        Uses multiprocessing to run code in a separate process that can be
+        terminated if it exceeds the timeout. This works for CPU-bound code
+        like infinite loops, unlike thread-based approaches.
         """
-        try:
-            # Run sandbox execution in a thread pool to not block async loop
-            loop = asyncio.get_event_loop()
-            result = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: self._sandbox.execute(source_code, bindings)
-                ),
-                timeout=self._limits.cpu_time_seconds
-            )
-            return result
-            
-        except asyncio.TimeoutError:
+        import multiprocessing
+        import queue
+        
+        def _run_in_process(result_queue, source_code, bindings):
+            """Function to run in the separate process."""
+            try:
+                # Create a new Sandbox instance in this process
+                # (can't share the parent's instance due to pickling)
+                from .sandbox import Sandbox
+                sandbox = Sandbox()
+                result = sandbox.execute(source_code, bindings)
+                result_queue.put(("success", result))
+            except Exception as e:
+                import traceback
+                result_queue.put(("error", f"{type(e).__name__}: {e}\n{traceback.format_exc()}"))
+        
+        # Create a queue for inter-process communication
+        result_queue = multiprocessing.Queue()
+        
+        # Start the process
+        process = multiprocessing.Process(
+            target=_run_in_process,
+            args=(result_queue, source_code, bindings)
+        )
+        process.start()
+        
+        # Wait for the process with timeout
+        process.join(timeout=self._limits.cpu_time_seconds)
+        
+        if process.is_alive():
+            # Process is still running - timeout occurred
+            process.terminate()
+            process.join(timeout=1.0)  # Give it a second to terminate gracefully
+            if process.is_alive():
+                process.kill()  # Force kill if terminate didn't work
             raise ExecutionTimeout()
+        
+        # Process completed - get the result
+        try:
+            status, result = result_queue.get_nowait()
+            if status == "success":
+                return result
+            else:
+                raise SandboxError(result)
+        except queue.Empty:
+            # Process exited without putting anything in the queue
+            raise SandboxError("Process terminated without returning a result")
     
     def validate(self, source_code: str) -> tuple[bool, list[str]]:
         """Validate extension source code.
