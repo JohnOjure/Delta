@@ -38,22 +38,17 @@ Delta is equipped with a comprehensive suite of native capabilities, extensible 
 ### Installation Procedure
 To install Delta, execute the following commands in your terminal:
 
-1.  **Clone the Repository**
-    ```bash
-    git clone https://github.com/JohnOjure/Delta.git
-    cd Delta
-    ```
+## Installation
 
-2.  **Run the Installation Script**
-    ```bash
-    ./install.sh
-    ```
-    This script performs the following actions:
-    -   Verifies system dependencies (Python, Git).
-    -   Initializes a dedicated Python virtual environment.
-    -   Installs all required packages from `requirements.txt`.
-    -   Launches the **Onboarding Wizard** to configure your environment.
-    -   Creates a desktop shortcut for convenient access.
+For detailed instructions, troubleshooting, and manual setup, please see [INSTALLATION.md](INSTALLATION.md).
+
+### Quick Start
+```bash
+git clone https://github.com/fluxx/delta.git
+cd delta
+./install.sh
+```
+This single command handles dependencies, configuration, and launches the onboarding wizard.
 
 ## Configuration
 The Onboarding Wizard will guide you through the initial setup. Configuration data is stored securely in `~/.delta/config.json`.
