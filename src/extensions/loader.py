@@ -80,13 +80,27 @@ class ExtensionLoader:
                 # Create a sync wrapper for the capability
                 cap = available_capabilities[cap_name]
                 
-                # Wrapper that converts async to sync
+                # Wrapper that converts async to sync (works in thread pool)
                 def make_wrapper(capability):
                     def wrapper(**kwargs):
                         import asyncio
-                        result = asyncio.get_event_loop().run_until_complete(
-                            capability.execute(**kwargs)
-                        )
+                        # Get or create event loop for this thread
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                # We're in an async context, need to run in new loop
+                                import concurrent.futures
+                                with concurrent.futures.ThreadPoolExecutor() as pool:
+                                    future = pool.submit(
+                                        lambda: asyncio.run(capability.execute(**kwargs))
+                                    )
+                                    result = future.result()
+                            else:
+                                result = loop.run_until_complete(capability.execute(**kwargs))
+                        except RuntimeError:
+                            # No event loop exists in this thread, create one
+                            result = asyncio.run(capability.execute(**kwargs))
+                        
                         if result.success:
                             return result.value
                         else:

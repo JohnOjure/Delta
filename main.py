@@ -22,11 +22,15 @@ from src.adapters.desktop import DesktopAdapter
 from src.core.agent import Agent
 from src.core.gemini_client import GeminiClient
 from src.extensions.registry import ExtensionRegistry
+from src.core.ghost import GhostMode
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def get_api_key() -> str:
     """Get Gemini API key from environment or prompt."""
-    key = os.environ.get("GEMINI_API_KEY")
+    key = os.getenv("GEMINI_API_KEY")
     if not key:
         key = input("Enter your Gemini API key: ").strip()
         if not key:
@@ -183,14 +187,29 @@ async def main():
     # Create agent
     agent = Agent(adapter, gemini, registry)
     
+    # Initialize Ghost Mode (Autonomy)
+    ghost = GhostMode(agent)
+    
     try:
+        # Start ghost mode in background
+        await ghost.start()
+        
         if args.interactive or not args.goal:
             await interactive_mode(agent)
         else:
             await run_goal(agent, args.goal)
+    except asyncio.CancelledError:
+        print("\n\n🛑 Operation cancelled.")
+    except KeyboardInterrupt:
+        print("\n\n🛑 Interrupted by user.")
     finally:
         await adapter.shutdown()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nGoodbye!")
+        sys.exit(0)
+

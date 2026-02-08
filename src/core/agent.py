@@ -14,6 +14,7 @@ from src.adapters.base import BaseAdapter
 from src.extensions.registry import ExtensionRegistry
 from src.extensions.introspection import ExtensionIntrospector
 from src.vm.executor import Executor
+from src.core.memory import Memory
 from .gemini_client import GeminiClient
 from .planner import Planner, Plan, ActionType, PlanStep
 from .generator import ExtensionGenerator
@@ -33,9 +34,12 @@ class AgentResult:
     """Result of an agent task."""
     success: bool
     message: str
+    response: str = ""  # Actual LLM response content
     data: Any = None
     extensions_created: list[str] = None
     steps_taken: int = 0
+    requires_approval: bool = False
+    proposed_alternative: dict = None
 
 
 class Agent:
@@ -58,7 +62,9 @@ class Agent:
         adapter: BaseAdapter,
         gemini_client: GeminiClient,
         registry: ExtensionRegistry,
-        max_iterations: int = 10
+        memory: Memory | None = None,
+        max_iterations: int = 10,
+        on_status: callable = None
     ):
         """Initialize the agent.
         
@@ -66,12 +72,16 @@ class Agent:
             adapter: Environment adapter providing capabilities
             gemini_client: Gemini API client for reasoning
             registry: Extension registry for storage
+            memory: Persistent memory for learning
             max_iterations: Max steps before giving up on a goal
+            on_status: Optional callback for status updates (async)
         """
         self._adapter = adapter
         self._gemini = gemini_client
         self._registry = registry
+        self._memory = memory
         self._max_iterations = max_iterations
+        self._on_status = on_status
         
         # Components
         self._executor = Executor(adapter.get_resource_limits())
@@ -83,6 +93,16 @@ class Agent:
         self._state = AgentState.IDLE
         self._current_goal: str | None = None
         self._iteration = 0
+    
+    async def _emit_status(self, activity: str, details: str = ""):
+        """Emit status update to callback."""
+        if self._on_status:
+            await self._on_status({
+                "state": self._state.value,
+                "activity": activity,
+                "details": details,
+                "iteration": self._iteration
+            })
     
     @property
     def state(self) -> AgentState:
@@ -108,7 +128,7 @@ class Agent:
         self._iteration = 0
         extensions_created = []
         
-        print(f"\n🎯 Goal: {goal}\n")
+        print(f"\n[Goal] {goal}\n")
         
         try:
             # Get environment info for context
@@ -119,43 +139,65 @@ class Agent:
             extensions = await self._registry.list_all()
             ext_str = "\n".join(e.to_prompt_string() for e in extensions) or "None"
             
+            # Get relevant learnings from memory (SELF-EVOLUTION)
+            learnings_str = ""
+            if self._memory:
+                try:
+                    learnings = await self._memory.get_learnings_for_task(goal)
+                    if learnings:
+                        learnings_str = "\n## Past Learnings (Use These!)\n"
+                        for l in learnings:
+                            learnings_str += f"- {l.content}\n"
+                        print(f"  [Memory] Retrieved {len(learnings)} relevant learnings")
+                except Exception as e:
+                    print(f"  [Memory] Failed to retrieve learnings: {e}")
+            
             while self._iteration < self._max_iterations:
                 self._iteration += 1
-                print(f"📍 Iteration {self._iteration}/{self._max_iterations}")
+                print(f"[Iteration {self._iteration}/{self._max_iterations}]")
                 
                 # 1. Plan
                 self._state = AgentState.PLANNING
-                print("  🧠 Planning...")
+                print("  Planning...")
+                await self._emit_status("Thinking", "Analyzing your request and planning approach...")
                 
-                plan_response = await self._gemini.plan(goal, env_str, ext_str)
+                # Inject learnings into planning context
+                context_ext_str = ext_str
+                if learnings_str:
+                    context_ext_str = ext_str + "\n" + learnings_str
+                
+                plan_response = await self._gemini.plan(goal, env_str, context_ext_str)
                 plan = self._planner.parse_plan(plan_response)
                 
-                print(f"  📋 Plan: {plan.analysis[:100]}...")
+                print(f"  Plan: {plan.analysis[:100]}...")
+                await self._emit_status("Planning", plan.analysis[:150])
                 
                 # 2. Execute each step
                 for step in plan.steps:
                     self._state = AgentState.EXECUTING
                     
                     if step.action == ActionType.COMPLETE:
-                        print("  ✅ Goal completed!")
+                        print("  Goal completed.")
                         return AgentResult(
                             success=True,
-                            message="Goal accomplished",
+                            message=step.details or "Goal accomplished",
+                            response=plan.analysis,
                             extensions_created=extensions_created,
                             steps_taken=self._iteration
                         )
                     
                     elif step.action == ActionType.FAIL:
-                        print(f"  ❌ Cannot complete: {step.details}")
+                        print(f"  Cannot complete: {step.details}")
                         return AgentResult(
                             success=False,
                             message=step.details,
+                            response=plan.analysis,
                             extensions_created=extensions_created,
                             steps_taken=self._iteration
                         )
                     
                     elif step.action == ActionType.CREATE_EXTENSION:
-                        print(f"  🔧 Creating extension: {step.details[:50]}...")
+                        print(f"  Creating extension: {step.details[:50]}...")
                         
                         # Generate extension code
                         caps = step.capabilities_needed or plan.required_capabilities
@@ -165,38 +207,145 @@ class Agent:
                             if c.name in caps
                         )
                         
-                        gen_response = await self._gemini.generate_extension(
-                            step.details, caps, caps_str
-                        )
+                        max_attempts = 15
+                        attempt = 0
+                        extension_valid = False
+                        all_errors = []  # Track all errors for learning
                         
-                        metadata, code = self._generator.parse_generation(gen_response)
-                        
-                        # Validate
-                        is_valid, issues = self._generator.validate(code)
-                        if not is_valid:
-                            print(f"    ⚠️ Validation issues: {issues}")
-                            code = self._generator.fix_common_issues(code)
+                        while attempt < max_attempts and not extension_valid:
+                            attempt += 1
+                            print(f"    Attempt {attempt}/{max_attempts}...")
+                            
+                            # Generate/regenerate extension
+                            if attempt == 1:
+                                gen_response = await self._gemini.generate_extension(
+                                    step.details, caps, caps_str
+                                )
+                            else:
+                                # Regenerate with feedback from previous attempt
+                                enhanced_desc = f"""{step.details}
+
+PREVIOUS ATTEMPT FAILED. Issues:
+{validation_result.get('reason', 'Unknown')}
+
+Suggestions:
+{validation_result.get('suggestions', 'Ensure the extension returns actual data, not empty results.')}
+
+Make sure to:
+1. Actually extract/process the data, don't just return success
+2. Validate that results are not empty before returning
+3. Return the actual data in the result"""
+                                gen_response = await self._gemini.generate_extension(
+                                    enhanced_desc, caps, caps_str
+                                )
+                            
+                            metadata, code = self._generator.parse_generation(gen_response)
+                            
+                            # Syntax validation
                             is_valid, issues = self._generator.validate(code)
+                            if not is_valid:
+                                print(f"    Syntax issues: {issues}")
+                                code = self._generator.fix_common_issues(code)
+                                is_valid, issues = self._generator.validate(code)
+                            
+                            if not is_valid:
+                                print(f"    Failed syntax validation, retrying...")
+                                validation_result = {"reason": f"Syntax errors: {issues}", "suggestions": "Fix syntax errors"}
+                                all_errors.append(f"Syntax error: {issues}")
+                                continue
+                            
+                            # Create temporary record for testing (not saved to DB)
+                            from src.models.extension import ExtensionRecord
+                            temp_record = ExtensionRecord(
+                                metadata=metadata,
+                                source_code=code
+                            )
+                            
+                            # Test execution
+                            print(f"    Testing {metadata.name}...")
+                            exec_result = await self._executor.execute(
+                                temp_record,
+                                self._adapter.get_available_capabilities()
+                            )
+                            
+                            if not exec_result.success:
+                                print(f"    Execution failed: {exec_result.error}")
+                                validation_result = {"reason": f"Execution error: {exec_result.error}", "suggestions": "Fix the runtime error"}
+                                all_errors.append(f"Execution error: {exec_result.error}")
+                                continue
+                            
+                            print(f"    Test result: {str(exec_result.value)[:150]}")
+                            
+                            # LLM validation - does result actually achieve the goal?
+                            validation_result = await self._gemini.validate_extension_result(
+                                original_goal=goal,
+                                extension_description=step.details,
+                                execution_result=exec_result.value
+                            )
+                            
+                            print(f"    Validation: {'PASS' if validation_result.get('valid') else 'FAIL'} - {validation_result.get('reason', '')[:80]}")
+                            
+                            if validation_result.get('valid'):
+                                extension_valid = True
+                            else:
+                                print(f"    Suggestions: {validation_result.get('suggestions', '')[:100]}")
+                                all_errors.append(f"Validation failed: {validation_result.get('reason', 'Unknown')}")
                         
-                        if is_valid:
-                            # Register extension
+                        if extension_valid:
+                            # NOW register the validated extension
                             record = await self._registry.register(metadata, code)
                             extensions_created.append(metadata.name)
-                            print(f"    ✅ Created: {metadata.name}")
+                            print(f"    Registered: {metadata.name} (validated)")
+                            
+                            # Record the successful execution
+                            await self._registry.record_execution(
+                                metadata.name,
+                                result=exec_result.value,
+                                error=None
+                            )
                             
                             # Update extensions list
                             extensions = await self._registry.list_all()
                             ext_str = "\n".join(e.to_prompt_string() for e in extensions)
                         else:
-                            print(f"    ❌ Failed to create valid extension")
+                            # All attempts failed - ask LLM for alternative approaches
+                            print(f"    Failed after {max_attempts} attempts. Finding alternatives...")
+                            
+                            alternatives = await self._gemini.suggest_alternatives(
+                                original_goal=goal,
+                                failed_approach=step.details,
+                                errors_encountered=all_errors[-5:]  # Last 5 errors
+                            )
+                            
+                            alt_msg = alternatives.get('message', 'Could not complete this task.')
+                            suggestions = alternatives.get('alternatives', [])
+                            recommended = alternatives.get('recommended', suggestions[0] if suggestions else "None")
+                            
+                            print(f"    Alternatives: {suggestions}")
+                            print(f"    Recommended: {recommended}")
+                            
+                            # ASK FOR APPROVAL instead of failing
+                            return AgentResult(
+                                success=False, # Temporarily False until approved
+                                message=f"I couldn't complete the task with the current approach. I have an alternative plan.",
+                                response=f"{alt_msg}\n\n**Recommended Alternative:**\n{recommended}\n\n**Other Options:**\n" + "\n".join(f"- {s}" for s in suggestions[:3]),
+                                extensions_created=extensions_created,
+                                steps_taken=self._iteration,
+                                requires_approval=True,
+                                proposed_alternative={
+                                    "original_goal": goal,
+                                    "alternative_plan": recommended,
+                                    "context": f"Failed approach: {step.details}"
+                                }
+                            )
                     
                     elif step.action == ActionType.EXECUTE_EXTENSION:
                         ext_name = step.extension_name or step.details.split()[0]
-                        print(f"  ▶️ Executing: {ext_name}")
+                        print(f"  Executing: {ext_name}")
                         
                         extension = await self._registry.get_by_name(ext_name)
                         if not extension:
-                            print(f"    ❌ Extension not found: {ext_name}")
+                            print(f"    Extension not found: {ext_name}")
                             continue
                         
                         result = await self._executor.execute(
@@ -212,9 +361,9 @@ class Agent:
                         )
                         
                         if result.success:
-                            print(f"    ✅ Result: {str(result.value)[:100]}...")
+                            print(f"    Result: {str(result.value)[:100]}...")
                         else:
-                            print(f"    ❌ Error: {result.error}")
+                            print(f"    Error: {result.error}")
                             
                             # Reflect on failure
                             self._state = AgentState.REFLECTING
@@ -223,11 +372,73 @@ class Agent:
                                 result.error,
                                 was_success=False
                             )
-                            print(f"    💭 Reflection: {reflection.get('assessment', '')[:100]}...")
+                            print(f"    Reflection: {reflection.get('assessment', '')[:100]}...")
+                    
+                    elif step.action == ActionType.USE_CAPABILITY:
+                        # Direct capability invocation
+                        details_str = step.details if isinstance(step.details, str) else str(step.details)
+                        
+                        # Parse capability name
+                        cap_name = None
+                        
+                        # Check if capabilities_needed is specified
+                        if step.capabilities_needed:
+                            cap_name = step.capabilities_needed[0]
+                        else:
+                            # Try to extract from details
+                            for available_cap in self._adapter.get_available_capabilities().keys():
+                                if available_cap in details_str:
+                                    cap_name = available_cap
+                                    break
+                        
+                        if not cap_name:
+                            print(f"    Could not determine capability from: {details_str[:50]}")
+                            continue
+                        
+                        print(f"  Using capability: {cap_name}")
+                        
+                        # Get the capability
+                        capabilities = self._adapter.get_available_capabilities()
+                        if cap_name not in capabilities:
+                            print(f"    Capability not available: {cap_name}")
+                            continue
+                        
+                        capability = capabilities[cap_name]
+                        
+                        # Get parameters - prioritize step.params from LLM
+                        cap_params = {}
+                        if step.params and isinstance(step.params, dict):
+                            cap_params = step.params
+                        elif isinstance(step.details, dict):
+                            # Legacy: extract from details dict
+                            cap_params = {k: v for k, v in step.details.items() 
+                                         if k not in ['action', 'capability']}
+                        elif cap_name.startswith('fs.') and not cap_params:
+                            # Default for filesystem operations
+                            cap_params = {'path': '.'}
+                        
+                        print(f"    Params: {cap_params}")
+                        
+                        # Execute the capability directly
+                        result = await capability.execute(**cap_params)
+                        
+                        if result.success:
+                            value = result.value
+                            if isinstance(value, list):
+                                print(f"    Result ({len(value)} items):")
+                                for item in value[:20]:
+                                    print(f"       - {item}")
+                                if len(value) > 20:
+                                    print(f"       ... and {len(value) - 20} more")
+                            else:
+                                print(f"    Result: {str(value)[:200]}")
+                        else:
+                            print(f"    Error: {result.error}")
                     
                     elif step.action == ActionType.REFLECT:
                         self._state = AgentState.REFLECTING
-                        print(f"  💭 Reflecting: {step.details[:50]}...")
+                        details_str = step.details if isinstance(step.details, str) else str(step.details)
+                        print(f"  Reflecting: {details_str[:50]}...")
                 
                 # If we got here, plan didn't explicitly complete
                 # Ask if we should continue
@@ -239,6 +450,18 @@ class Agent:
                 )
                 
                 if not reflection.get("should_retry", True):
+                    # Store learning from success (SELF-EVOLUTION)
+                    if self._memory:
+                        try:
+                            await self._memory.learn(
+                                task=goal,
+                                outcome="success",
+                                lesson=f"Successfully completed using extensions: {extensions_created or 'none'}. Approach: {plan.analysis[:200]}"
+                            )
+                            print(f"  [Memory] Stored success learning")
+                        except Exception as e:
+                            print(f"  [Memory] Failed to store learning: {e}")
+                    
                     return AgentResult(
                         success=True,
                         message="Plan executed",

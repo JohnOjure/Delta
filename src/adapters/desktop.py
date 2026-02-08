@@ -98,7 +98,11 @@ class DesktopAdapter(BaseAdapter):
             # Storage
             "storage.get": StorageGetCapability(self._storage),
             "storage.set": StorageSetCapability(self._storage),
+
             "storage.delete": StorageDeleteCapability(self._storage),
+            
+            # Vision
+            "vision.capture_screen": VisionCapability(),
         }
         
         # Shell capabilities (if enabled)

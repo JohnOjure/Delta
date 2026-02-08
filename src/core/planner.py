@@ -11,6 +11,7 @@ class ActionType(str, Enum):
     """Types of actions the agent can take."""
     EXECUTE_EXTENSION = "execute_extension"
     CREATE_EXTENSION = "create_extension"
+    USE_CAPABILITY = "use_capability"
     REFLECT = "reflect"
     COMPLETE = "complete"
     FAIL = "fail"
@@ -23,6 +24,7 @@ class PlanStep:
     details: str
     extension_name: str | None = None
     capabilities_needed: list[str] | None = None
+    params: dict | None = None  # Parameters for use_capability action
 
 
 @dataclass
@@ -58,7 +60,8 @@ class Planner:
                 action=action,
                 details=step_data.get("details", ""),
                 extension_name=step_data.get("extension_name"),
-                capabilities_needed=step_data.get("capabilities_needed")
+                capabilities_needed=step_data.get("capabilities_needed"),
+                params=step_data.get("params")
             ))
         
         return Plan(

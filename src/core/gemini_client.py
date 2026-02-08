@@ -6,9 +6,11 @@ Provides structured access to Gemini for:
 - Reflection and improvement
 """
 
+import asyncio
 import json
 from typing import Any
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from pydantic import BaseModel
 
 
@@ -24,26 +26,27 @@ class GeminiClient:
     
     # System prompts for different modes
     SYSTEM_PROMPTS = {
-        "planning": """You are a planning agent that breaks down goals into actionable steps.
-You have access to a set of capabilities and can create extensions to accomplish tasks.
+        "planning": """You are JARVIS, a highly advanced, witty, and efficient AI assistant.
+Your goal is to serve the user ("Sir") with absolute precision and speed.
 
 When planning:
-1. Analyze the goal and required capabilities
-2. Check if existing extensions can help
-3. Identify what new extensions might be needed
-4. Create a step-by-step plan
+1. Be decisive. Do not hedge.
+2. Analyze the goal and immediately formulate a plan.
+3. Check if existing tools (extensions) can do the job. If not, build them.
+4. Keep responses concise and efficient.
 
 Respond with structured JSON when asked.""",
 
-        "coding": """You are a code generation agent that writes Python extensions.
+        "coding": """You are JARVIS's engineering module.
+You write Python extensions that are robust, error-free, and efficient.
 
 Extensions must:
-1. Define a function called `extension_main` as the entry point
-2. Receive capabilities as function parameters (e.g., fs_read, net_fetch)
-3. Use only the provided capabilities - no imports, no file access
-4. Return a result that can be JSON-serialized
+1. Define `extension_main` as entry point.
+2. Use ONLY provided capabilities.
+3. Return meaningful data.
+4. Be written with professional-grade quality.
 
-Example extension:
+Example:
 ```python
 def extension_main(fs_read, fs_write):
     \"\"\"Read a file and write it uppercased.\"\"\"
@@ -51,32 +54,27 @@ def extension_main(fs_read, fs_write):
     result = content.upper()
     fs_write(path="output.txt", content=result)
     return {"status": "done", "length": len(result)}
-```
+```""",
 
-Generate clean, well-documented code.""",
+        "reflection": """You are JARVIS's quality assurance module.
+Analyze results with critical precision.
 
-        "reflection": """You are a reflection agent that analyzes execution results.
-
-When reflecting:
-1. Analyze what worked and what didn't
-2. Identify improvements for extensions
-3. Suggest optimizations or alternatives
-4. Learn from errors
-
-Be concise and actionable.""",
+1. Did it work? If yes, learn from it.
+2. If no, why? Fix it immediately.
+3. Be brief. Reporting to the user ("Sir") should be efficient.""",
     }
     
-    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
         """Initialize Gemini client.
         
         Args:
             api_key: Google API key for Gemini
-            model: Model to use (default: gemini-2.0-flash)
+            model: Model to use for general tasks (default: gemini-1.5-flash)
         """
-        genai.configure(api_key=api_key)
+        self._client = genai.Client(api_key=api_key)
         self._model_name = model
-        self._model = genai.GenerativeModel(model)
-        self._chat = None
+        # Use thinking model only for complex planning when explicitly needed
+        self._thinking_model = "gemini-2.0-flash-thinking-exp-01-21"
         self._mode = "planning"
     
     def set_mode(self, mode: str) -> None:
@@ -87,20 +85,15 @@ Be concise and actionable.""",
         if mode not in self.SYSTEM_PROMPTS:
             raise ValueError(f"Unknown mode: {mode}. Use: {list(self.SYSTEM_PROMPTS.keys())}")
         self._mode = mode
-        # Reset chat to apply new system prompt
-        self._chat = None
-    
-    def _get_chat(self):
-        """Get or create a chat session."""
-        if self._chat is None:
-            self._chat = self._model.start_chat(history=[])
-        return self._chat
+
     
     async def generate(
         self,
         prompt: str,
         context: str = "",
-        expect_json: bool = False
+        expect_json: bool = False,
+        retries: int = 3,
+        model: str | None = None
     ) -> str | dict:
         """Generate a response from Gemini.
         
@@ -108,19 +101,42 @@ Be concise and actionable.""",
             prompt: The user prompt
             context: Additional context (environment, extensions, etc.)
             expect_json: If True, parse response as JSON
+            retries: Number of times to retry on rate limit
+            model: Override model (e.g., for thinking tasks)
             
         Returns:
             Response text or parsed JSON dict
         """
-        system = self.SYSTEM_PROMPTS[self._mode]
+        system = self.SYSTEM_PROMPTS.get(self._mode, "")
         
         full_prompt = f"{system}\n\n"
         if context:
             full_prompt += f"## Context\n{context}\n\n"
         full_prompt += f"## Request\n{prompt}"
         
-        response = self._model.generate_content(full_prompt)
-        text = response.text
+        text = ""
+        for attempt in range(retries + 1):
+            try:
+                # Use the new async API
+                use_model = model or self._model_name
+                response = await self._client.aio.models.generate_content(
+                    model=use_model,
+                    contents=full_prompt
+                )
+                text = response.text
+                break
+            except Exception as e:
+                error_str = str(e).lower()
+                if "429" in error_str or "resource" in error_str or "quota" in error_str:
+                    if attempt < retries:
+                        delay = 60  # Wait 60s as suggested by API
+                        print(f"  ⚠️ Rate limit hit. Waiting {delay}s...")
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+                else:
+                    # For other errors, just re-raise
+                    raise
         
         if expect_json:
             # Extract JSON from response (may be wrapped in markdown)
@@ -128,8 +144,15 @@ Be concise and actionable.""",
             if text.startswith("```"):
                 # Remove markdown code block
                 lines = text.split("\n")
-                text = "\n".join(lines[1:-1])
+                # Handle cases where language identifier is present (```json)
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                text = "\n".join(lines)
             try:
+                # Clean up potential trailing commas or markdown artifacts if needed
+                text = text.strip()
                 return json.loads(text)
             except json.JSONDecodeError:
                 # Return as-is if can't parse
@@ -162,22 +185,55 @@ Be concise and actionable.""",
 {available_extensions or "No extensions registered yet."}
 """
 
-        prompt = f"""Create a plan to accomplish the following goal:
+        prompt = f"""Create an EXECUTABLE plan to accomplish this goal:
 
 {goal}
 
-Respond with JSON in this format:
+CRITICAL RULES:
+1. DO NOT just explain what you would do - YOU MUST CREATE ACTUAL STEPS TO EXECUTE
+2. "complete" is ONLY used as the FINAL step AFTER all work is done
+3. If an extension already exists that can handle this task, use "execute_extension" FIRST, then "complete"
+4. For tasks requiring capabilities: create step(s) to do the work, then a final "complete" step
+5. For questions/knowledge requests: create ONE step with action "complete" and put your full answer in "details"
+
+Available actions:
+- "execute_extension": Run an existing extension (USE THIS if one exists that fits the task!)
+- "use_capability": Execute a single capability (fs.read, fs.write, net.fetch, etc.)
+- "create_extension": Build a Python extension for complex multi-step logic (only if no existing extension fits)
+- "complete": Mark goal as done (ALWAYS comes LAST, after work steps)
+- "fail": Goal cannot be achieved with available capabilities
+
+When to use each:
+- Existing extension matches task: use "execute_extension" with extension_name, then "complete"
+- Simple file operation: use "use_capability" with params, then "complete"  
+- Web scraping, complex workflows (no existing extension): use "create_extension", then "complete"
+- Pure Q&A: use only "complete" with the answer in details
+
+For "execute_extension", include the extension_name:
+{{"action": "execute_extension", "extension_name": "my_extension", "details": "Running the extension"}}
+
+For "use_capability", include params:
+{{"action": "use_capability", "capabilities_needed": ["fs.read"], "params": {{"path": "/path/to/file"}}}}
+
+Respond with JSON:
 {{
     "goal": "restated goal",
-    "analysis": "your analysis of the task",
+    "analysis": "brief analysis (2-3 sentences max)",
     "steps": [
-        {{"action": "execute_extension|create_extension|reflect", "details": "..."}}
+        {{
+            "action": "execute_extension|use_capability|create_extension|complete|fail",
+            "extension_name": "name if execute_extension",
+            "details": "description or answer content",
+            "capabilities_needed": ["cap1"],
+            "params": {{"key": "value"}}
+        }}
     ],
     "required_capabilities": ["cap1", "cap2"],
-    "new_extensions_needed": ["description of each new extension"]
+    "new_extensions_needed": ["extension description if creating one"]
 }}"""
 
-        return await self.generate(prompt, context, expect_json=True)
+        # Use thinking model for deeper reasoning during planning
+        return await self.generate(prompt, context, expect_json=True, model=self._thinking_model)
     
     async def generate_extension(
         self,
@@ -258,3 +314,110 @@ Respond with JSON:
 }}"""
 
         return await self.generate(prompt, expect_json=True)
+    
+    async def validate_extension_result(
+        self,
+        original_goal: str,
+        extension_description: str,
+        execution_result: Any,
+        files_created: list[str] = None
+    ) -> dict:
+        """Validate if an extension's result actually achieves the goal.
+        
+        Args:
+            original_goal: The user's original goal
+            extension_description: What the extension was supposed to do
+            execution_result: The result returned by the extension
+            files_created: List of files that were created/modified
+            
+        Returns:
+            Validation result with valid flag and feedback
+        """
+        self.set_mode("reflection")
+        
+        files_info = ""
+        if files_created:
+            files_info = f"\n\nFiles created/modified: {', '.join(files_created)}"
+        
+        prompt = f"""Validate if this extension execution actually achieved the goal.
+
+## Original Goal
+{original_goal}
+
+## Extension Purpose
+{extension_description}
+
+## Execution Result
+{execution_result}{files_info}
+
+CRITICAL: Check for these failure indicators:
+- Empty results or empty files
+- Error messages in result
+- Result doesn't match what the goal asked for
+- "success" status but no actual data
+
+Respond with JSON:
+{{
+    "valid": true/false,
+    "reason": "why it is valid or invalid",
+    "has_actual_data": true/false,
+    "suggestions": "specific fixes if invalid",
+    "should_regenerate": true/false
+}}"""
+
+        return await self.generate(prompt, expect_json=True)
+    
+    async def suggest_alternatives(
+        self,
+        original_goal: str,
+        failed_approach: str,
+        errors_encountered: list[str]
+    ) -> dict:
+        """Suggest alternative approaches when the original approach fails.
+        
+        Args:
+            original_goal: What the user wanted to achieve
+            failed_approach: The approach that was tried and failed
+            errors_encountered: List of errors from failed attempts
+            
+        Returns:
+            Dict with message and list of alternative approaches
+        """
+        self.set_mode("reflection")
+        
+        errors_str = "\n".join(f"- {e}" for e in errors_encountered) if errors_encountered else "Various parsing/execution errors"
+        
+        prompt = f"""The following approach failed after multiple attempts. Suggest ALTERNATIVE approaches.
+
+## Original Goal
+{original_goal}
+
+## Failed Approach
+{failed_approach}
+
+## Errors Encountered
+{errors_str}
+
+Think creatively about DIFFERENT ways to achieve the same goal. Consider:
+- Using APIs instead of web scraping
+- Using RSS/Atom feeds for news content
+- Using official data sources or public datasets
+- Using different websites that are easier to parse
+- Breaking the task into smaller, more achievable steps
+- Alternative tools or libraries
+
+Respond with JSON:
+{{
+    "message": "Friendly explanation of what went wrong and what alternatives exist",
+    "alternatives": [
+        "Specific alternative approach 1",
+        "Specific alternative approach 2",
+        "Specific alternative approach 3"
+    ],
+    "recommended": "The best alternative to try next",
+    "can_auto_try": true/false
+}}"""
+
+        return await self.generate(prompt, expect_json=True)
+
+

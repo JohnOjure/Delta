@@ -70,6 +70,22 @@ class ExtensionRegistry:
                     INSERT INTO extensions_fts(rowid, name, description, tags)
                     VALUES (new.id, new.name, new.description, new.tags);
                 END;
+                
+                -- Version history table for rollback support
+                CREATE TABLE IF NOT EXISTS version_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    extension_name TEXT NOT NULL,
+                    version TEXT NOT NULL,
+                    source_code TEXT NOT NULL,
+                    description TEXT,
+                    required_capabilities TEXT,
+                    tags TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (extension_name) REFERENCES extensions(name)
+                );
+                
+                CREATE INDEX IF NOT EXISTS idx_version_history_name 
+                ON version_history(extension_name, version DESC);
             """)
             self._initialized = True
         
@@ -107,7 +123,7 @@ class ExtensionRegistry:
         """
         conn = await self._ensure_initialized()
         
-        async with conn:
+        try:
             # Check if extension exists
             cursor = await conn.execute(
                 "SELECT id FROM extensions WHERE name = ?",
@@ -154,6 +170,8 @@ class ExtensionRegistry:
                 ext_id = cursor.lastrowid
             
             await conn.commit()
+        finally:
+            await conn.close()
         
         # Fetch and return the complete record
         return await self.get_by_name(metadata.name)
@@ -162,7 +180,7 @@ class ExtensionRegistry:
         """Get an extension by name."""
         conn = await self._ensure_initialized()
         
-        async with conn:
+        try:
             cursor = await conn.execute(
                 "SELECT * FROM extensions WHERE name = ?",
                 (name,)
@@ -173,12 +191,14 @@ class ExtensionRegistry:
                 return None
             
             return self._row_to_record(row)
+        finally:
+            await conn.close()
     
     async def get_by_id(self, ext_id: int) -> Optional[ExtensionRecord]:
         """Get an extension by ID."""
         conn = await self._ensure_initialized()
         
-        async with conn:
+        try:
             cursor = await conn.execute(
                 "SELECT * FROM extensions WHERE id = ?",
                 (ext_id,)
@@ -189,12 +209,14 @@ class ExtensionRegistry:
                 return None
             
             return self._row_to_record(row)
+        finally:
+            await conn.close()
     
     async def search(self, query: str, limit: int = 10) -> list[ExtensionRecord]:
         """Search extensions using full-text search."""
         conn = await self._ensure_initialized()
         
-        async with conn:
+        try:
             cursor = await conn.execute("""
                 SELECT e.* FROM extensions e
                 JOIN extensions_fts fts ON e.id = fts.rowid
@@ -205,24 +227,28 @@ class ExtensionRegistry:
             
             rows = await cursor.fetchall()
             return [self._row_to_record(row) for row in rows]
+        finally:
+            await conn.close()
     
     async def list_all(self, limit: int = 100) -> list[ExtensionRecord]:
         """List all extensions."""
         conn = await self._ensure_initialized()
         
-        async with conn:
+        try:
             cursor = await conn.execute(
                 "SELECT * FROM extensions ORDER BY updated_at DESC LIMIT ?",
                 (limit,)
             )
             rows = await cursor.fetchall()
             return [self._row_to_record(row) for row in rows]
+        finally:
+            await conn.close()
     
     async def list_by_capability(self, capability: str) -> list[ExtensionRecord]:
         """List extensions that use a specific capability."""
         conn = await self._ensure_initialized()
         
-        async with conn:
+        try:
             # Using JSON search
             cursor = await conn.execute("""
                 SELECT * FROM extensions 
@@ -232,6 +258,8 @@ class ExtensionRegistry:
             
             rows = await cursor.fetchall()
             return [self._row_to_record(row) for row in rows]
+        finally:
+            await conn.close()
     
     async def record_execution(
         self,
@@ -242,7 +270,7 @@ class ExtensionRegistry:
         """Record an execution of an extension."""
         conn = await self._ensure_initialized()
         
-        async with conn:
+        try:
             result_json = json.dumps(result) if result is not None else None
             
             await conn.execute("""
@@ -255,15 +283,141 @@ class ExtensionRegistry:
             """, (result_json, error, name))
             
             await conn.commit()
+        finally:
+            await conn.close()
     
     async def delete(self, name: str) -> bool:
         """Delete an extension."""
         conn = await self._ensure_initialized()
         
-        async with conn:
+        try:
             cursor = await conn.execute(
                 "DELETE FROM extensions WHERE name = ?",
                 (name,)
             )
             await conn.commit()
             return cursor.rowcount > 0
+        finally:
+            await conn.close()
+    
+    async def _archive_version(
+        self, 
+        conn: aiosqlite.Connection,
+        name: str,
+        version: str,
+        source_code: str,
+        description: str,
+        required_capabilities: str,
+        tags: str
+    ) -> None:
+        """Archive an extension version to history."""
+        await conn.execute("""
+            INSERT INTO version_history 
+            (extension_name, version, source_code, description, required_capabilities, tags)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (name, version, source_code, description, required_capabilities, tags))
+    
+    async def get_version_history(self, name: str) -> list[dict]:
+        """Get version history for an extension.
+        
+        Returns list of {version, created_at} dicts, newest first.
+        """
+        conn = await self._ensure_initialized()
+        
+        try:
+            cursor = await conn.execute("""
+                SELECT version, created_at FROM version_history
+                WHERE extension_name = ?
+                ORDER BY created_at DESC
+            """, (name,))
+            rows = await cursor.fetchall()
+            return [{"version": row[0], "created_at": row[1]} for row in rows]
+        finally:
+            await conn.close()
+    
+    async def rollback(self, name: str, version: str) -> Optional[ExtensionRecord]:
+        """Rollback an extension to a previous version.
+        
+        Args:
+            name: Extension name
+            version: Version to rollback to
+            
+        Returns:
+            Updated ExtensionRecord or None if version not found
+        """
+        conn = await self._ensure_initialized()
+        
+        try:
+            # Get the archived version
+            cursor = await conn.execute("""
+                SELECT version, source_code, description, required_capabilities, tags
+                FROM version_history
+                WHERE extension_name = ? AND version = ?
+            """, (name, version))
+            row = await cursor.fetchone()
+            
+            if row is None:
+                return None
+            
+            old_version, source_code, description, required_caps, tags = row
+            
+            # Archive current version first
+            cursor = await conn.execute("""
+                SELECT version, source_code, description, required_capabilities, tags
+                FROM extensions WHERE name = ?
+            """, (name,))
+            current = await cursor.fetchone()
+            
+            if current:
+                await self._archive_version(
+                    conn, name, current[0], current[1], current[2], current[3], current[4]
+                )
+            
+            # Update to the old version
+            await conn.execute("""
+                UPDATE extensions SET
+                    version = ?,
+                    source_code = ?,
+                    description = ?,
+                    required_capabilities = ?,
+                    tags = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE name = ?
+            """, (old_version, source_code, description, required_caps, tags, name))
+            
+            await conn.commit()
+        finally:
+            await conn.close()
+        
+        return await self.get_by_name(name)
+    
+    async def get_stats(self) -> dict:
+        """Get registry statistics."""
+        conn = await self._ensure_initialized()
+        
+        try:
+            cursor = await conn.execute("SELECT COUNT(*) FROM extensions")
+            total = (await cursor.fetchone())[0]
+            
+            cursor = await conn.execute(
+                "SELECT SUM(execution_count) FROM extensions"
+            )
+            total_executions = (await cursor.fetchone())[0] or 0
+            
+            cursor = await conn.execute("""
+                SELECT name, execution_count FROM extensions
+                ORDER BY execution_count DESC LIMIT 5
+            """)
+            top_extensions = [
+                {"name": row[0], "executions": row[1]}
+                for row in await cursor.fetchall()
+            ]
+            
+            return {
+                "total_extensions": total,
+                "total_executions": total_executions,
+                "top_extensions": top_extensions
+            }
+        finally:
+            await conn.close()
+
