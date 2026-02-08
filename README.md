@@ -1,14 +1,14 @@
 # Delta Agent: Autonomous Recursive Intelligence System
 
 ## Overview
-Delta is an advanced, self-evolving artificial intelligence agent designed for autonomous task execution and recursive self-improvement. Built upon a modular architecture, the system leverages Google's Gemini 2.0 Pro and Flash models to reason, plan, and execute complex workflows within a local computing environment.
+Delta is an advanced, self-evolving artificial intelligence agent designed for autonomous task execution and recursive self-improvement. Built upon a modular architecture, the system leverages Google's Gemini 3.0 Pro models to reason, plan, and execute complex workflows within a local computing environment.
 
 Distinguished from traditional conversational interfaces, Delta operates with full agency. It possesses the capability to manipulate files, execute arbitrary code, interact with network resources, and continuously refine its own toolset through a recursive extension mechanism.
 
 ## Architecture
 The system is engineered around a tripartite "Kernel-Cortex" design:
 
-1.  **Cortex (Reasoning Engine)**: The cognitive core, powered by Gemini 2.0, responsible for high-level planning, decision-making, and error analysis.
+1.  **Cortex (Reasoning Engine)**: The cognitive core, powered by Gemini 3.0, responsible for high-level planning, decision-making, and error analysis.
 2.  **Kernel (Execution Engine)**: A secure, sandboxed runtime environment that manages memory, executes actions, and enforces resource limits.
 3.  **Peripherals (Adapters)**: Modular interfaces that bridge the refined logic of the Cortex with the raw capabilities of the host operating system.
 
