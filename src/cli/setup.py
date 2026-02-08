@@ -100,19 +100,16 @@ def setup_wizard():
     # 3. Model Selection
     print(f"\n{Colors.BLUE}[?] Select Model:{Colors.ENDC}")
     models = [
-        "gemini-2.0-flash (Recommended - Fast & Smart)",
-        "gemini-1.5-pro (Slower, Higher Reasoning)",
-        "gemini-1.5-flash (Legacy)"
+        "gemini-3-pro-preview (Recommended - Latest & Most Capable)",
+        "gemini-2.0-flash (Fast & Efficient)"
     ]
     for i, m in enumerate(models):
         print(f"{i+1}. {m}")
         
-    choice = input("Select [1-3] (Default: 1): ").strip()
-    model_name = "gemini-2.0-flash"
+    choice = input("Select [1-2] (Default: 1): ").strip()
+    model_name = "gemini-3-pro-preview"
     if choice == "2":
-        model_name = "gemini-1.5-pro"
-    elif choice == "3":
-        model_name = "gemini-1.5-flash"
+        model_name = "gemini-2.0-flash"
         
     # 4. Voice
     print(f"\n{Colors.BLUE}[?] Voice Interaction:{Colors.ENDC}")

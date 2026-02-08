@@ -474,7 +474,7 @@ class DeltaChat {
             const config = await res.json();
 
             document.getElementById('setting-name').value = config.user_name || '';
-            document.getElementById('setting-model').value = config.model_name || 'gemini-1.5-flash';
+            document.getElementById('setting-model').value = config.model_name || 'gemini-3-pro-preview';
             document.getElementById('setting-api-key').value = config.api_key || '';
             document.getElementById('setting-voice').checked = config.voice_enabled || false;
             document.getElementById('setting-limit').value = config.usage_limit || 100;
