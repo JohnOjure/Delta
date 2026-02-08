@@ -87,6 +87,35 @@ class ExtensionRegistry:
                 CREATE INDEX IF NOT EXISTS idx_version_history_name 
                 ON version_history(extension_name, version DESC);
             """)
+
+            # Inject Core Extensions
+            from src.extensions.core import CORE_EXTENSIONS
+            for ext in CORE_EXTENSIONS:
+                # Check if exists
+                cursor = await conn.execute("SELECT id FROM extensions WHERE name = ?", (ext["name"],))
+                exists = await cursor.fetchone()
+                
+                caps_json = json.dumps(ext["required_capabilities"])
+                tags_json = json.dumps(["core", "safety_net"])
+                
+                if exists:
+                    # Force update to ensure core extensions are always correct
+                    await conn.execute("""
+                        UPDATE extensions SET
+                            description = ?,
+                            required_capabilities = ?,
+                            tags = ?,
+                            source_code = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE name = ?
+                    """, (ext["description"], caps_json, tags_json, ext["code"], ext["name"]))
+                else:
+                    await conn.execute("""
+                        INSERT INTO extensions (name, version, description, required_capabilities, tags, source_code)
+                        VALUES (?, '1.0.0', ?, ?, ?, ?)
+                    """, (ext["name"], ext["description"], caps_json, tags_json, ext["code"]))
+            
+            await conn.commit()
             self._initialized = True
         
         return conn

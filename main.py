@@ -56,17 +56,15 @@ def ensure_config() -> UserConfig:
     
     print("\n3. Model Selection")
     print("   Select the default AI model to use:")
-    print("   1) gemini-1.5-flash (Fast, efficient, lower cost)")
-    print("   2) gemini-1.5-pro   (More distinct reasoning, higher cost)")
-    print("   3) gemini-2.0-flash (Newest, fastest)")
+    print("   1) gemini-3-pro-preview (Latest, most capable)")
+    print("   2) gemini-2.0-flash     (Fast, efficient)")
     
-    model_choice = input("   Choose [1-3] (default: 1): ").strip()
+    model_choice = input("   Choose [1-2] (default: 1): ").strip()
     model_map = {
-        "1": "gemini-1.5-flash",
-        "2": "gemini-1.5-pro",
-        "3": "gemini-2.0-flash"
+        "1": "gemini-3-pro-preview",
+        "2": "gemini-2.0-flash"
     }
-    model_name = model_map.get(model_choice, "gemini-1.5-flash")
+    model_name = model_map.get(model_choice, "gemini-3-pro-preview")
     
     print("\n4. Safety & Limits")
     limit_input = input("   Daily request limit (default: 100): ").strip()

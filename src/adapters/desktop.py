@@ -24,6 +24,7 @@ from src.capabilities.storage import (
     StorageDeleteCapability,
 )
 from src.capabilities.shell import ShellCapability, PythonExecCapability
+from src.capabilities.system import SystemCapability
 
 from .base import BaseAdapter
 
@@ -88,6 +89,7 @@ class DesktopAdapter(BaseAdapter):
             "fs.read": FileSystemReadCapability(self._allowed_paths),
             "fs.write": FileSystemWriteCapability(self._allowed_paths),
             "fs.list": FileSystemListCapability(self._allowed_paths),
+            "filesystem": FileSystemReadCapability(self._allowed_paths),  # Alias for core extensions
             
             # Network
             "net.fetch": NetworkFetchCapability(
@@ -101,12 +103,17 @@ class DesktopAdapter(BaseAdapter):
             "storage.delete": StorageDeleteCapability(self._storage),
         }
         
+
+
         # Vision capability (optional - requires mss)
         try:
             from src.capabilities.vision import VisionCapability
             self._capabilities["vision.capture_screen"] = VisionCapability()
         except ImportError:
             pass  # mss not installed
+        
+        # System capability
+        self._capabilities["system"] = SystemCapability()
         
         # Shell capabilities (if enabled)
         if self._enable_shell:
