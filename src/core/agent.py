@@ -366,11 +366,26 @@ Make sure to:
                             print(f"    Error: {result.error}")
                             
                             # Reflect on failure
+                            # Reflect on failure with VISUAL context
                             self._state = AgentState.REFLECTING
+                            
+                            # Capture screen for debugging
+                            image_data = None
+                            try:
+                                vision = self._adapter.get_available_capabilities().get("vision.capture_screen")
+                                if vision:
+                                    vis_result = await vision.execute()
+                                    if vis_result.success:
+                                        image_data = vis_result.value.get("image_data")
+                                        print("    Captured screenshot for debugging")
+                            except Exception as e:
+                                print(f"    Failed to capture debug screenshot: {e}")
+
                             reflection = await self._gemini.reflect(
                                 f"Executed {ext_name}",
                                 result.error,
-                                was_success=False
+                                was_success=False,
+                                image_data=image_data
                             )
                             print(f"    Reflection: {reflection.get('assessment', '')[:100]}...")
                     

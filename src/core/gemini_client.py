@@ -62,6 +62,14 @@ Analyze results with critical precision.
 1. Did it work? If yes, learn from it.
 2. If no, why? Fix it immediately.
 3. Be brief. Reporting to the user ("Sir") should be efficient.""",
+
+        "system_analysis": """You are JARVIS's system monitor.
+Analyze system metrics and decide if the user ("Sir") needs to be alerted.
+
+1. Ignore minor fluctuations.
+2. Alert only on critical trends or dangerous spikes.
+3. Be proactive but not annoying.
+4. Suggest specific actions (e.g., "Kill process X", "Clear cache").""",
     }
     
     def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
@@ -280,7 +288,8 @@ Respond with JSON in this format:
         self,
         action_taken: str,
         result: str,
-        was_success: bool
+        was_success: bool,
+        image_data: str | None = None
     ) -> dict:
         """Reflect on an action's result.
         
@@ -288,6 +297,7 @@ Respond with JSON in this format:
             action_taken: Description of what was done
             result: The result or error
             was_success: Whether it succeeded
+            image_data: Optional base64 image data for visual context
             
         Returns:
             Reflection with learnings and suggestions
@@ -296,7 +306,32 @@ Respond with JSON in this format:
         
         status = "succeeded" if was_success else "failed"
         
-        prompt = f"""Reflect on this action that {status}:
+        if image_data:
+            prompt = f"""Reflect on this action that {status}. I have attached a screenshot of the state properly.
+
+## Action
+{action_taken}
+
+## Result
+{result}
+
+## Visual Context
+(Screenshot attached)
+
+Respond with JSON:
+{{
+    "assessment": "what happened and why (incorporate visual clues if any)",
+    "learnings": ["learning1", "learning2"],
+    "suggestions": ["suggestion1", "suggestion2"],
+    "should_retry": true/false,
+    "retry_modifications": "changes to make if retrying"
+}}"""
+            
+            # Use multimodal generation
+            return await self._generate_multimodal(prompt, image_data, expect_json=True)
+            
+        else:
+            prompt = f"""Reflect on this action that {status}:
 
 ## Action
 {action_taken}
@@ -313,7 +348,7 @@ Respond with JSON:
     "retry_modifications": "changes to make if retrying"
 }}"""
 
-        return await self.generate(prompt, expect_json=True)
+            return await self.generate(prompt, expect_json=True)
     
     async def validate_extension_result(
         self,
@@ -419,5 +454,80 @@ Respond with JSON:
 }}"""
 
         return await self.generate(prompt, expect_json=True)
+
+    async def analyze_system_health(self, stats: dict) -> dict:
+        """Analyze system health stats.
+        
+        Args:
+            stats: Dictionary of system metrics
+            
+        Returns:
+            Analysis dict with 'alert_needed' and 'message'
+        """
+        self.set_mode("system_analysis")
+        
+        prompt = f"""Analyze these system stats:
+{json.dumps(stats, indent=2)}
+
+Decide if I should alert the user.
+
+Respond with JSON:
+{{
+    "alert_needed": true/false,
+    "message": "Friendly alert message if needed, else empty string",
+    "severity": "low|medium|high"
+}}"""
+        
+        return await self.generate(prompt, expect_json=True)
+
+    async def _generate_multimodal(
+        self,
+        prompt: str,
+        image_data: str,
+        expect_json: bool = False
+    ) -> dict | str:
+        """Generate content with text and image."""
+        try:
+            # Construct the content part for the image
+            # Google GenAI SDK expects specific format for blobs
+            image_part = types.Part.from_bytes(
+                data=image_data, # base64 string needs decoding? No, SDK handles bytes usually, but from_bytes takes bytes
+                mime_type="image/png"
+            )
+            
+            import base64
+            image_bytes = base64.b64decode(image_data)
+             
+            response = await self._client.aio.models.generate_content(
+                model=self._model_name,
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/png")
+                ]
+            )
+            
+            text = response.text
+            
+            if expect_json:
+                 # Extract JSON from response (may be wrapped in markdown)
+                text = text.strip()
+                if text.startswith("```"):
+                    lines = text.split("\n")
+                    if lines[0].startswith("```"):
+                        lines = lines[1:]
+                    if lines[-1].startswith("```"):
+                        lines = lines[:-1]
+                    text = "\n".join(lines)
+                try:
+                    return json.loads(text)
+                except:
+                    return {"raw": text}
+            
+            return text
+            
+        except Exception as e:
+            print(f"Multimodal generation failed: {e}")
+            # Fallback to text-only if image fails
+            return await self.generate(prompt + "\n[Image upload failed]", expect_json=expect_json)
 
 
