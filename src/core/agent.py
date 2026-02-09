@@ -107,11 +107,11 @@ class Agent:
         self._current_goal: str | None = None
         self._iteration = 0
     
-    async def _emit_status(self, activity: str, details: str = ""):
+    async def _emit_status(self, activity: str, details: str = "", state: str = None):
         """Emit status update to callback."""
         if self._on_status:
             await self._on_status({
-                "state": self._state.value,
+                "state": state or self._state.value,
                 "activity": activity,
                 "details": details,
                 "iteration": self._iteration

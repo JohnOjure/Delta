@@ -283,6 +283,7 @@ Commands:
   interactive (-i)     Start an interactive session
   server (--web)       Start the Web UI server
   daemon (--daemon)    Start the background daemon process
+  restart              Restart the background agent
   help                 Show this help message
 
 Options:
@@ -301,13 +302,56 @@ For more details, see the README.md or documentation.
     print(help_text)
 
 
+def restart_system():
+    """Kill all running Delta instances and restart the background daemon."""
+    try:
+        import psutil
+        import subprocess
+    except ImportError:
+        print("❌ Error: 'psutil' module is required for restart command.")
+        print("Run: pip install psutil")
+        sys.exit(1)
+    
+    current_pid = os.getpid()
+    
+    print("Stopping existing Delta processes...")
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            # Check if it's a python process running main.py
+            if proc.pid == current_pid:
+                continue
+                
+            cmdline = proc.info.get('cmdline', [])
+            if cmdline and 'python' in proc.info['name'].lower() and any('main.py' in arg for arg in cmdline):
+                print(f"Killing process {proc.pid}...")
+                proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+            
+    print("Starting Delta Daemon...")
+    # Use the vbs script if on Windows for hidden window, else python --daemon
+    if platform.system() == "Windows" and os.path.exists("delta-web.vbs"):
+        subprocess.Popen(["cscript", "//Nologo", "delta-web.vbs"], shell=True)
+    else:
+        # Detached process
+        if platform.system() == "Windows":
+             subprocess.Popen([sys.executable, "main.py", "--daemon"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        else:
+             subprocess.Popen([sys.executable, "main.py", "--daemon"], start_new_session=True)
+        
+    print("✅ Restart initiated.")
+    sys.exit(0)
+
+
 def main():
     print_banner()
-    # Check for "help" command before argparse to override default behavior if needed, 
-    # though argparse handles -h/--help. "delta help" ends up as goal="help".
-    if len(sys.argv) > 1 and sys.argv[1].lower() == "help":
-        print_help()
-        sys.exit(0)
+    # Check for "help" command before argparse
+    if len(sys.argv) > 1:
+        if sys.argv[1].lower() == "help":
+            print_help()
+            sys.exit(0)
+        if sys.argv[1].lower() == "restart":
+            restart_system()
 
     parser = argparse.ArgumentParser(
         description="Delta: Self-Extensible Agent System",
@@ -341,6 +385,12 @@ def main():
     )
     
     parser.add_argument(
+        "--web-worker",
+        action="store_true",
+        help=argparse.SUPPRESS  # Hidden argument for internal use
+    )
+    
+    parser.add_argument(
         "--daemon",
         action="store_true",
         help="Start the background daemon"
@@ -365,47 +415,67 @@ def main():
         print_help()
         sys.exit(0)
     
-    # Handle Web UI Launch
-    if args.web:
+    # Handle Restart Command
+    if args.goal == "restart":
+        restart_system()
+        return
+
+    # Handle Web Worker (The actual server process)
+    if args.web_worker:
         try:
             import uvicorn
-            import webbrowser
-            from threading import Timer
-            
-            # Redirect output to log file if not in debug mode
-            if not args.debug:
-                log_dir = Path.home() / ".delta" / "logs"
-                log_dir.mkdir(parents=True, exist_ok=True)
-                sys.stdout = open(log_dir / "web_stdout.log", "a", encoding="utf-8")
-                sys.stderr = open(log_dir / "web_stderr.log", "a", encoding="utf-8")
-            
-            url = "http://localhost:8000"
-            if args.debug:
-                print(f"🌐 Starting Delta Web UI at {url}...")
-            
-            # Simple approach: threaded timer to open browser
-            Timer(1.5, lambda: webbrowser.open(url)).start()
-            
-            # Import app directly to avoid re-import issues
             from src.web.server import app
             
             # Run uvicorn synchronously
-            # LOGGING CONFIG: We want uvicorn to log to our redirected stdout/stderr or its own usage
             uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info" if args.debug else "warning")
             return
-        except ImportError:
-            # If we can't print to stdout because it's redirected and closed/failed, we might be in trouble.
-            # But usually we want to see this error.
-            # Restore stdout for critical errors if possible or just print
-            sys.stdout = sys.__stdout__
-            print("❌ Error: Web dependencies not installed.")
-            print("Run: pip install fastapi uvicorn websockets")
-            sys.exit(1)
         except Exception as e:
             if not args.debug:
                  sys.stdout = sys.__stdout__
-            print(f"❌ Error starting Web UI: {e}")
+            print(f"❌ Error starting Web Worker: {e}")
             sys.exit(1)
+
+    # Handle Web UI Launch (Launcher)
+    if args.web:
+        import socket
+        import webbrowser
+        import subprocess
+        from time import sleep
+
+        def is_port_in_use(port):
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                return s.connect_ex(('localhost', port)) == 0
+
+        url = "http://localhost:8000"
+
+        if is_port_in_use(8000):
+            print(f"✅ Delta Web is already running at {url}")
+            print("Opening browser...")
+            webbrowser.open(url)
+            return
+
+        print("🚀 Starting Delta Web in background...")
+        
+        # Spawn detached process
+        if platform.system() == "Windows":
+             subprocess.Popen([sys.executable, "main.py", "--web-worker"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        else:
+             subprocess.Popen([sys.executable, "main.py", "--web-worker"], start_new_session=True)
+             
+        # Wait a moment to ensure it starts (optional, but good for user confidence)
+        print("Waiting for server to initialize...")
+        for _ in range(10):
+            if is_port_in_use(8000):
+                print(f"✅ Started successfully! Opening {url}")
+                webbrowser.open(url)
+                return
+            sleep(0.5)
+            
+        print(f"⚠️ Server started but not yet responding on port 8000. It might take a moment.")
+        print(f"Open {url} in your browser.")
+        return
+            
+    # Handle Daemon Launch
             
     # Handle Daemon Launch
     if args.daemon:
