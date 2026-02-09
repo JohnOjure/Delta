@@ -316,6 +316,32 @@ class Agent:
                         # Only fall back to analysis if details is empty or generic
                         answer = step.details if step.details and step.details not in ["Goal accomplished", ""] else plan.analysis
                         
+                        # ENHANCEMENT: Auto-generate natural language summary if the answer is generic
+                        # and we actually performed actions (created extensions)
+                        if (not answer or len(answer) < 20 or "Goal accomplished" in answer or "Plan executed" in answer) and (extensions_created or self._iteration > 1):
+                            try:
+                                print("  [Response] Generating natural language summary...")
+                                await self._emit_status("Summarizing", "Generating final response...")
+                                
+                                # Use conversation context which contains the tool outputs
+                                context_msgs = await self._conversation.get_recent_context(session_id, limit=5)
+                                if context_msgs:
+                                    summary_prompt = f"""The goal '{goal}' was completed.
+Based on the conversation context (which includes tool outputs), provide a helpful, natural language final response for the user.
+- Summarize what was done
+- Present the final result clearly
+- Do NOT be repetitive or generic. BE SPECIFIC."""
+                                    
+                                    summary = await self._gemini.generate(
+                                        summary_prompt, 
+                                        context=context_msgs,
+                                        model=self._gemini._model_name
+                                    )
+                                    if isinstance(summary, dict): summary = summary.get("text", str(summary))
+                                    answer = summary.strip()
+                            except Exception as e:
+                                print(f"  [Response] Failed to generate summary: {e}")
+
                         # Record Agent Response
                         if self._conversation:
                             await self._conversation.add_message("assistant", answer, session_id)

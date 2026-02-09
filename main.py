@@ -315,31 +315,64 @@ def restart_system():
     current_pid = os.getpid()
     
     print("Stopping existing Delta processes...")
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        try:
-            # Check if it's a python process running main.py
-            if proc.pid == current_pid:
-                continue
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                # Check if it's a python process running main.py
+                if proc.pid == current_pid:
+                    continue
+                    
+                cmdline = proc.info.get('cmdline', [])
                 
-            cmdline = proc.info.get('cmdline', [])
-            if cmdline and 'python' in proc.info['name'].lower() and any('main.py' in arg for arg in cmdline):
+                # Check for python/main.py match first
+                if not (cmdline and 'python' in proc.info['name'].lower() and any('main.py' in arg for arg in cmdline)):
+                    continue
+                    
+                # Exclude 'restart' commands (ourselves or other restart attempts)
+                if 'restart' in str(cmdline).lower():
+                   continue
+                   
+                # If we got here, it's a target
                 print(f"Killing process {proc.pid}...")
-                proc.kill()
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
+                sys.stdout.flush()
+                try:
+                    proc.kill()
+                    print(f"Killed {proc.pid}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+                    print(f"Ignored kill error: {e}")
+                except Exception as e:
+                    print(f"Generic kill error: {e}")
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+            except Exception as e:
+                print(f"⚠️ Warning during process iter: {e}")
+    except Exception as e:
+        print(f"⚠️ Error iterating processes: {e}")
             
     print("Starting Delta Daemon...")
-    # Use the vbs script if on Windows for hidden window, else python --daemon
-    if platform.system() == "Windows" and os.path.exists("delta-web.vbs"):
-        subprocess.Popen(["cscript", "//Nologo", "delta-web.vbs"], shell=True)
-    else:
-        # Detached process
-        if platform.system() == "Windows":
-             subprocess.Popen([sys.executable, "main.py", "--daemon"], creationflags=subprocess.CREATE_NEW_CONSOLE)
-        else:
-             subprocess.Popen([sys.executable, "main.py", "--daemon"], start_new_session=True)
+    try:
+        # Spawn detached process for web worker (same as --web logic)
+        print(f"🚀 Restarting Delta Web Worker using {sys.executable}...")
+        sys.stdout.flush()
         
-    print("✅ Restart initiated.")
+        if platform.system() == "Windows":
+             # CREATE_NO_WINDOW = 0x08000000
+             subprocess.Popen([sys.executable, "main.py", "--web-worker"], creationflags=0x08000000)
+        else:
+             subprocess.Popen([sys.executable, "main.py", "--web-worker"], start_new_session=True)
+            
+        print("✅ Restart initiated.")
+    except BaseException as e:
+        print(f"❌ Failed to restart (BaseException): {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ Failed to restart (Exception): {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+        
     sys.exit(0)
 
 
@@ -423,16 +456,28 @@ def main():
     # Handle Web Worker (The actual server process)
     if args.web_worker:
         try:
+            # Redirect output to log file
+            log_dir = Path.home() / ".delta"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / "delta.log"
+            
+            # Reopen stdout/stderr in append mode with buffering=1 (line buffered)
+            sys.stdout = open(log_file, "a", encoding="utf-8", buffering=1)
+            sys.stderr = open(log_file, "a", encoding="utf-8", buffering=1)
+            
             import uvicorn
             from src.web.server import app
             
             # Run uvicorn synchronously
-            uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info" if args.debug else "warning")
+            uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
             return
         except Exception as e:
-            if not args.debug:
-                 sys.stdout = sys.__stdout__
-            print(f"❌ Error starting Web Worker: {e}")
+            # Try to log to file, fallback to original stderr (though likely not visible)
+            try:
+                with open(Path.home() / ".delta" / "delta.log", "a") as f:
+                    f.write(f"FATAL WEB WORKER ERROR: {e}\n")
+            except:
+                pass
             sys.exit(1)
 
     # Handle Web UI Launch (Launcher)
@@ -458,7 +503,8 @@ def main():
         
         # Spawn detached process
         if platform.system() == "Windows":
-             subprocess.Popen([sys.executable, "main.py", "--web-worker"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+             # CREATE_NO_WINDOW = 0x08000000
+             subprocess.Popen([sys.executable, "main.py", "--web-worker"], creationflags=0x08000000)
         else:
              subprocess.Popen([sys.executable, "main.py", "--web-worker"], start_new_session=True)
              

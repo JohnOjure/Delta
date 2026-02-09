@@ -313,6 +313,23 @@ async def get_config_endpoint():
     }
 
 
+@app.get("/api/logs")
+async def get_logs(lines: int = 100):
+    """Get the last N lines of logs."""
+    log_path = Path.home() / ".delta" / "delta.log"
+    if not log_path.exists():
+        return {"logs": []}
+        
+    try:
+        # Simple implementation for reading last N lines
+        # For large files, seeking from end is better, but this is fine for now
+        content = log_path.read_text(encoding="utf-8", errors="replace")
+        all_lines = content.splitlines()
+        return {"logs": all_lines[-lines:]}
+    except Exception as e:
+        return {"logs": [f"Error reading logs: {e}"]}
+
+
 @app.post("/api/config")
 async def update_config_endpoint(start_config: dict):
     """Update configuration."""

@@ -190,6 +190,8 @@ class DeltaApp {
             this.loadExtensions();
         }
     }
+    
+
 
     async startNewChat(createNow = true) {
         // Remove isRunning check to allow starting new chat while another runs in background
