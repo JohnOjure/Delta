@@ -80,13 +80,16 @@ def install_dependencies():
 
 def create_windows_shortcut(target, shortcut_path, arguments="", icon=""):
     """Create a Windows shortcut using VBScript."""
+    def vbs_escape(s):
+        return s.replace('"', '""')
+
     vbs_script = f"""
     Set oWS = WScript.CreateObject("WScript.Shell")
-    sLinkFile = "{shortcut_path}"
+    sLinkFile = "{vbs_escape(shortcut_path)}"
     Set oLink = oWS.CreateShortcut(sLinkFile)
-    oLink.TargetPath = "{target}"
-    oLink.Arguments = "{arguments}"
-    oLink.IconLocation = "{icon}"
+    oLink.TargetPath = "{vbs_escape(target)}"
+    oLink.Arguments = "{vbs_escape(arguments)}"
+    oLink.IconLocation = "{vbs_escape(icon)}"
     oLink.Save
     """
     vbs_file = Path("create_shortcut.vbs")
