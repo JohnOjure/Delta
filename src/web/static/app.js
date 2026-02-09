@@ -432,12 +432,26 @@ class DeltaApp {
     formatMarkdown(text) {
         if (!text) return '';
 
-        // 1. Handle explicit Code Blocks first to avoid interference
+        // Configure marked options
+        marked.setOptions({
+            breaks: true, // Enable line breaks
+            gfm: true,    // Enable GitHub Flavored Markdown
+            highlight: function(code, lang) {
+                return code; // We handle code blocks separately/later or let it be plain
+            }
+        });
+
+        // 1. Pre-process specific Delta-style structures
+        
+        // Handle explicit Code Blocks to ensure they are preserved and styled
+        // We use a temporary placeholder to prevent marked from messing up our custom code block HTML
+        const codeBlocks = [];
         text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
             const cleanCode = this.escapeHtml(code.trim());
             const displayLang = lang || 'python';
+            const placeholder = `__DELTA_CODE_BLOCK_${codeBlocks.length}__`;
             
-            return `
+            codeBlocks.push(`
 <div class="code-block-wrapper">
     <div class="code-header">
         <span class="code-lang">${displayLang}</span>
@@ -447,62 +461,52 @@ class DeltaApp {
         </button>
     </div>
     <pre><code class="language-${displayLang}">${cleanCode}</code></pre>
-</div>`;
+</div>`);
+            return placeholder;
         });
 
-        // 2. Auto-detect and Pretty-print RAW JSON/Dicts (only if NOT already in a code block)
-        // We look for "Return: {" pattern and take everything until specific boundary characters 
-        // that typically follow it in tool outputs
+        // 2. Auto-detect and Pretty-print RAW JSON/Dicts
         const jsonPattern = /(?:Return:\s*)?(\{[\s\S]{15,}\}|\[[\s\S]{15,}\])/g;
         text = text.replace(jsonPattern, (match) => {
-            // If this was already processed into HTML wrapper, skip
-            if (match.includes('div') || match.includes('code-block')) return match;
+             // If it matches a placeholder, skip
+            if (match.includes('__DELTA_CODE_BLOCK_')) return match;
             
             try {
                 let jsonStr = match.trim();
                 if (jsonStr.startsWith('Return:')) jsonStr = jsonStr.replace('Return:', '').trim();
                 
-                // Heuristic conversion for Python dicts
+                 // Python dict fixups
                 jsonStr = jsonStr.replace(/'/g, '"')
                                  .replace(/(\W)True(\W)/g, '$1true$2')
                                  .replace(/(\W)False(\W)/g, '$1false$2')
                                  .replace(/(\W)None(\W)/g, '$1null$2');
                                  
-                // Verify balanced braces (naive but helps with truncation)
-                const open = (jsonStr.match(/\{/g) || []).length;
-                const close = (jsonStr.match(/\}/g) || []).length;
-                if (open !== close && open > 0) {
-                    // It's likely truncated or malformed, but if it looks like a dict, 
-                    // we try to at least show what we have
-                }
-
                 const obj = JSON.parse(jsonStr);
-                return `\n\`\`\`json\n${JSON.stringify(obj, null, 2)}\n\`\`\`\n`;
+                const prettyJson = JSON.stringify(obj, null, 2);
+                const placeholder = `__DELTA_CODE_BLOCK_${codeBlocks.length}__`;
+                codeBlocks.push(`
+<div class="code-block-wrapper">
+    <div class="code-header"><span class="code-lang">json</span></div>
+    <pre><code class="language-json">${this.escapeHtml(prettyJson)}</code></pre>
+</div>`);
+                return placeholder;
             } catch (e) {
                 return match;
             }
         });
 
-        // 3. Re-process any newly created json blocks from step 2
-        text = text.replace(/```json\n([\s\S]*?)```/g, (match, code) => {
-             const cleanCode = this.escapeHtml(code.trim());
-             return `
-<div class="code-block-wrapper">
-    <div class="code-header"><span class="code-lang">json</span></div>
-    <pre><code class="language-json">${cleanCode}</code></pre>
-</div>`;
+        // 3. Use marked for the rest (headers, bold, lists, etc.)
+        let html = marked.parse(text);
+
+        // 4. Restore code blocks
+        codeBlocks.forEach((block, index) => {
+            html = html.replace(`__DELTA_CODE_BLOCK_${index}__`, block);
         });
+        
+        // Remove surrounding <p> tags from placeholders if marked added them
+        html = html.replace(/<p>(<div class="code-block-wrapper">[\s\S]*?<\/div>)<\/p>/g, '$1');
 
-        // Inline Code
-        text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-        // Bold
-        text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-        // Line Breaks
-        text = text.replace(/\n/g, '<br>');
-
-        return text;
+        return html;
     }
 
     escapeHtml(str) {
@@ -606,6 +610,20 @@ class DeltaApp {
                 spinner.style.animation = 'none';
             }
         }
+    }
+
+    copyToClipboard(btn) {
+        const code = btn.parentElement.nextElementSibling.innerText;
+        navigator.clipboard.writeText(code);
+        
+        const originalText = btn.innerHTML;
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Copied!`;
+        btn.classList.add('copied');
+        
+        setTimeout(() => {
+            btn.innerHTML = originalText;
+            btn.classList.remove('copied');
+        }, 2000);
     }
 
     async loadExtensions() {

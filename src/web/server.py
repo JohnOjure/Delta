@@ -449,9 +449,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     })
                     
                 except Exception as e:
+                    import traceback
+                    print(f"  [Error] WebSocket loop error: {e}")
+                    traceback.print_exc()
+                    
                     await manager.broadcast({
                         "type": "error",
-                        "error": str(e),
+                        "error": "An internal error occurred. Please try again.",
                         "timestamp": datetime.utcnow().isoformat()
                     })
     
@@ -510,9 +514,13 @@ Please execute this alternative approach directly."""
         })
         
     except Exception as e:
+        import traceback
+        print(f"  [Error] Alternative plan error: {e}")
+        traceback.print_exc()
+        
         await manager.broadcast({
             "type": "error",
-            "error": str(e),
+            "error": "An internal error occurred while executing the plan.",
             "timestamp": datetime.utcnow().isoformat()
         })
 

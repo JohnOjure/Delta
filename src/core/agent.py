@@ -754,9 +754,14 @@ Make sure to:
                                 try:
                                     if isinstance(value, (dict, list)):
                                         formatted_val = f"\n```json\n{json.dumps(value, indent=2)}\n```"
+                                    elif isinstance(value, str) and len(value) > 20000:
+                                        # Truncate very large string outputs (like HTML) to avoid overflowing context
+                                        formatted_val = value[:20000] + f"\n... [Truncated {len(value)-20000} chars]"
                                 except:
                                     formatted_val = str(value)
-                                    
+                                    if len(formatted_val) > 20000:
+                                         formatted_val = formatted_val[:20000] + f"\n... [Truncated {len(formatted_val)-20000} chars]"
+
                                 await self._conversation.add_message("tool", f"Capability '{cap_name}' output: {formatted_val}", session_id)
                                 
                             if isinstance(value, list):
@@ -850,9 +855,14 @@ Make sure to:
             
         except Exception as e:
             import traceback
+            # Log the full error for debugging
+            print(f"  [Error] Internal agent error: {e}")
+            traceback.print_exc()
+            
+            # Return a friendly, generic message to the user
             return AgentResult(
                 success=False,
-                message=f"Error: {e}\n{traceback.format_exc()}",
+                message="I encountered an unexpected issue while processing your request. Please try again or check the logs.",
                 extensions_created=extensions_created,
                 steps_taken=self._iteration
             )
