@@ -85,6 +85,7 @@ def setup_wizard():
     print(f"\n{Colors.BLUE}[?] AI Model Configuration:{Colors.ENDC}")
     print("Delta uses Google Gemini (Fast, Smart, Multimodal).")
     
+    api_key = current_config.get("api_key", "")
     if api_key:
         mask = api_key[:4] + "*" * (len(api_key)-8) + api_key[-4:]
         print(f"Current Key: {mask}")
