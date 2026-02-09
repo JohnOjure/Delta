@@ -141,6 +141,7 @@ class Agent:
         self._iteration = 0
         extensions_created = []
         last_created_extension = None
+        last_tool_output = None  # Track last tool output across iterations for summary
         
         print(f"\n[Goal] {goal}\n")
         
@@ -405,7 +406,7 @@ Based on the conversation context (which includes tool outputs), provide a helpf
                             if c.name in caps
                         )
                         
-                        max_attempts = 30  # Increased persistence
+                        max_attempts = 5  # Smarter, fewer retries
                         attempt = 0
                         extension_valid = False
                         all_errors = []  # Track all errors for learning
@@ -421,19 +422,18 @@ Based on the conversation context (which includes tool outputs), provide a helpf
                                     step.details, caps, caps_str
                                 )
                             else:
-                                # Regenerate with feedback from previous attempt
+                                # Build accumulated error context
+                                error_history = "\n".join(f"  Attempt {i+1}: {e}" for i, e in enumerate(all_errors))
                                 enhanced_desc = f"""{step.details}
 
-PREVIOUS ATTEMPT FAILED. Issues:
-{validation_result.get('reason', 'Unknown')}
+PREVIOUS {len(all_errors)} ATTEMPT(S) ALL FAILED. Here is the FULL error history:
+{error_history}
 
-Suggestions:
-{validation_result.get('suggestions', 'Ensure the extension returns actual data, not empty results.')}
-
-Make sure to:
-1. Actually extract/process the data, don't just return success
-2. Validate that results are not empty before returning
-3. Return the actual data in the result"""
+You MUST take a COMPLETELY DIFFERENT approach. Do NOT repeat the same mistakes.
+If the API/URL failed, try a DIFFERENT API or URL.
+If imports failed, use different libraries.
+If parsing failed, simplify the data extraction.
+Keep it simple — the simplest working code wins."""
                                 gen_response = await self._gemini.generate_extension(
                                     enhanced_desc, caps, caps_str
                                 )
@@ -486,6 +486,25 @@ Make sure to:
                                 continue
                             
                             print(f"    Test result: {str(exec_result.value)[:150]}")
+                            
+                            # Quick check: did the extension return an error result?
+                            val = exec_result.value
+                            is_error_result = False
+                            error_msg = ""
+                            if isinstance(val, dict):
+                                # Catch {"status": "error", ...} or {"error": "..."} patterns
+                                if val.get("status") == "error" or val.get("error"):
+                                    is_error_result = True
+                                    error_msg = val.get("message") or val.get("error") or str(val)
+                            elif isinstance(val, str) and ("error" in val.lower()[:50] or "failed" in val.lower()[:50]):
+                                is_error_result = True
+                                error_msg = val[:200]
+                            
+                            if is_error_result:
+                                print(f"    Extension returned error result: {error_msg[:100]}")
+                                validation_result = {"reason": f"Extension returned error: {error_msg}", "suggestions": "Try a different API, URL, or approach entirely"}
+                                all_errors.append(f"Extension returned error: {error_msg}")
+                                continue
                             
                             # LLM validation - does result actually achieve the goal?
                             validation_result = await self._gemini.validate_extension_result(
@@ -662,6 +681,7 @@ Make sure to:
                                 await self._conversation.add_message("tool", output_msg, session_id)
                             
                             print(f"    Result: {str(result.value)[:100]}...")
+                            last_tool_output = result.value  # Track for final summary
                             if result.output:
                                 print(f"    Logs: {result.output[:200]}...")
                         else:
@@ -747,6 +767,7 @@ Make sure to:
                         
                         if result.success:
                             value = result.value
+                            last_tool_output = value  # Track for final summary
                             # Add to conversation history
                             if self._conversation:
                                 import json
@@ -762,7 +783,12 @@ Make sure to:
                                     if len(formatted_val) > 20000:
                                          formatted_val = formatted_val[:20000] + f"\n... [Truncated {len(formatted_val)-20000} chars]"
 
-                                await self._conversation.add_message("tool", f"Capability '{cap_name}' output: {formatted_val}", session_id)
+                                output_msg = f"Capability '{cap_name}' output: {formatted_val}"
+                                
+                                # Emit real-time event for UI
+                                await self._emit_status("Tool Output", output_msg, state="tool_output")
+                                
+                                await self._conversation.add_message("tool", output_msg, session_id)
                                 
                             if isinstance(value, list):
                                 print(f"    Result ({len(value)} items):")
@@ -778,6 +804,38 @@ Make sure to:
                         # Force re-planning to observe results
                         print("    Capability executed. Re-planning to observe results...")
                         break
+                    elif step.action == ActionType.UPDATE_MEMORY:
+                        # Update SOUL.md or USER.md
+                        target = step.params.get("target", "user") if step.params else "user"
+                        content = step.params.get("content", "") if step.params else step.details
+                        
+                        if not content:
+                            print(f"    No content provided for update_memory")
+                            continue
+                        
+                        print(f"  Updating {target} memory...")
+                        await self._emit_status("Updating", f"Updating {target} profile...")
+                        
+                        if self._memory:
+                            try:
+                                if target == "soul":
+                                    await self._memory.update_identity(content)
+                                    print(f"    ✅ SOUL.md updated")
+                                    await self._emit_status("Updated", "Identity updated successfully")
+                                else:
+                                    await self._memory.update_user_profile(content)
+                                    print(f"    ✅ USER.md updated")
+                                    await self._emit_status("Updated", "User profile updated successfully")
+                                    
+                                if self._conversation:
+                                    await self._conversation.add_message(
+                                        "tool", 
+                                        f"Updated {target} memory successfully.", 
+                                        session_id
+                                    )
+                            except Exception as e:
+                                print(f"    ❌ Failed to update {target}: {e}")
+                        continue
                     
                     elif step.action == ActionType.REFLECT:
                         self._state = AgentState.REFLECTING
@@ -809,18 +867,22 @@ Make sure to:
                     response_text = reflection.get("assessment", "Goal completed.")
                     
                     
-                    # Auto-generate summary if missing OR generic, and we have tool outputs
-                    # result variable holds the last execution result (ExecutionResult)
-                    last_output = result.value if 'result' in locals() and hasattr(result, 'value') else None
-                    if (not response_text or len(response_text) < 20 or "Goal completed" in response_text) and (extensions_created or steps_taken > 0):
+                    # Always generate a natural language summary when we have tool output
+                    if last_tool_output is not None:
                         try:
-                            # Contextualize with the goal and last few messages
-                            data_preview = str(last_output)[:5000] if last_output else "No data returned."
-                            summary_prompt = f"The goal '{goal}' was completed. The tool output was:\n{data_preview}\n\nProvide a helpful, natural language summary of this result for the user. Do not be repetitive."
+                            await self._emit_status("Composing", "Generating response...")
+                            
+                            data_preview = str(last_tool_output)[:5000]
+                            summary_prompt = f"""The user asked: "{goal}"
+
+Here is the data that was retrieved:
+{data_preview}
+
+Respond to the user naturally based on this data. You are Delta, an AI assistant."""
                             summary = await self._gemini.generate(
                                 summary_prompt, 
-                                context=await self._conversation.get_recent_context(session_id, limit=3),
-                                model=self._gemini._model_name # Use fast model
+                                context=await self._conversation.get_recent_context(session_id, limit=3) if self._conversation else "",
+                                model=self._gemini._model_name
                             )
                             if isinstance(summary, dict): summary = summary.get("text", str(summary))
                             response_text = summary.strip()

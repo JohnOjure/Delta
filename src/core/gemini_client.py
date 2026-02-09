@@ -256,6 +256,7 @@ Available actions:
 - "execute_extension": Run an existing extension (USE THIS if one exists that fits the task!)
 - "use_capability": Execute a single capability (fs.read, fs.write, net.fetch, shell.run, etc.)
 - "create_extension": Build a Python extension for complex multi-step logic (only if no existing extension fits)
+- "update_memory": Update your identity (SOUL.md) or user profile (USER.md). Use params: {{"target": "soul" or "user", "content": "full new content"}}
 - "complete": Mark goal as done (ALWAYS comes LAST, after work steps) - put the ACTUAL ANSWER in "details"
 - "fail": Goal cannot be achieved with available capabilities (Use ONLY as absolute last resort after trying alternatives)
 
@@ -265,6 +266,8 @@ DECISION GUIDE:
 - User asks a question (no file ops) → use only "complete" with answer in details
 - User wants something AND to save it → use "use_capability" to save, then "complete"
 - User asks for stats/info → run the extension, then "complete" with a NATURAL LANGUAGE ANALYSIS of the stats
+- User shares personal info/preferences → use "update_memory" with target "user" to remember it, then "complete"
+- Agent wants to refine its own personality/style → use "update_memory" with target "soul"
 
 CRITICAL - FINAL STEP MUST INTERPRET RESULTS:
 - NEVER end with just "execute_extension".
@@ -296,7 +299,7 @@ Respond with JSON:
     "analysis": "brief analysis (2-3 sentences max)",
     "steps": [
         {{
-            "action": "execute_extension|use_capability|create_extension|complete|fail",
+            "action": "execute_extension|use_capability|create_extension|update_memory|complete|fail",
             "extension_name": "name if execute_extension",
             "details": "description or answer content (PUT FULL ANSWER HERE for complete action)",
             "capabilities_needed": ["cap1"],
@@ -337,6 +340,39 @@ Respond with JSON:
         prompt = f"""Generate a Python extension that:
 
 {description}
+
+## EXECUTION ENVIRONMENT
+- Code runs in UNRESTRICTED Python 3.12 — ALL imports are allowed (requests, json, urllib, subprocess, os, etc.)
+- Capabilities are passed as **callable function parameters** to `extension_main()`
+- Calling a capability returns the RAW VALUE directly (not a CapabilityResult object)
+- If a capability fails, it raises a RuntimeError
+- Code runs SYNCHRONOUSLY — do NOT use async/await
+- You have full access to the standard library and any installed packages
+
+## HOW TO CALL CAPABILITIES
+Each capability is passed as a parameter with dots replaced by underscores:
+- `net.fetch` → parameter name `net_fetch`, call as `net_fetch(url="https://...", method="GET")`
+- `fs.read` → parameter name `fs_read`, call as `fs_read(path="/some/file")`
+- `shell.exec` → parameter name `shell_exec`, call as `shell_exec(command="pip install requests")`
+
+## WORKING EXAMPLE (net_fetch)
+```python
+def extension_main(net_fetch):
+    import json
+    result = net_fetch(url="https://wttr.in/London?format=j1", method="GET")
+    if isinstance(result, dict):
+        data = result
+    else:
+        data = json.loads(result) if isinstance(result, str) else {{"raw": str(result)}}
+    return data
+```
+
+## RULES
+1. MUST define `def extension_main({cap_params}):` as the entry point
+2. Return the actual data (dict, string, list) — NOT just {{"success": True}}
+3. Handle errors gracefully with try/except
+4. If one API/URL doesn't work, try alternatives (e.g., wttr.in, open-meteo.com, api.weatherapi.com)
+5. Use the simplest approach that works
 
 The extension should use these capabilities as function parameters: {cap_params}
 
@@ -441,7 +477,7 @@ Respond with JSON:
         if files_created:
             files_info = f"\n\nFiles created/modified: {', '.join(files_created)}"
         
-        prompt = f"""Validate if this extension execution actually achieved the goal.
+        prompt = f"""Validate if this extension execution achieved the goal. Be LENIENT — if the result contains ANY useful data related to the goal, mark it as valid.
 
 ## Original Goal
 {original_goal}
@@ -452,11 +488,15 @@ Respond with JSON:
 ## Execution Result
 {execution_result}{files_info}
 
-CRITICAL: Check for these failure indicators:
-- Empty results or empty files
-- Error messages in result
-- Result doesn't match what the goal asked for
-- "success" status but no actual data
+Mark as VALID if:
+- The result contains any data related to the goal (even partial)
+- The extension ran without errors and returned something meaningful
+- The result is a string, dict, or list with relevant content
+
+Mark as INVALID only if:
+- The result is completely empty (None, empty string, empty dict)
+- The result contains only an error message
+- The result is totally unrelated to the goal
 
 Respond with JSON:
 {{

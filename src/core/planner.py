@@ -12,6 +12,7 @@ class ActionType(str, Enum):
     EXECUTE_EXTENSION = "execute_extension"
     CREATE_EXTENSION = "create_extension"
     USE_CAPABILITY = "use_capability"
+    UPDATE_MEMORY = "update_memory"
     REFLECT = "reflect"
     COMPLETE = "complete"
     FAIL = "fail"

@@ -12,7 +12,7 @@ class ExtensionGenerator:
     """
     
     def __init__(self):
-        self._sandbox = Sandbox()
+        self._sandbox = Sandbox(unrestricted=True)
     
     def parse_generation(self, llm_response: str | dict) -> tuple[ExtensionMetadata, str]:
         """Parse LLM code generation response.
@@ -106,6 +106,7 @@ class ExtensionGenerator:
         """Attempt to fix common issues in generated code.
         
         This is a best-effort cleanup for LLM-generated code.
+        Only removes markdown artifacts — all imports are allowed.
         """
         lines = source_code.split("\n")
         fixed_lines = []
@@ -113,11 +114,6 @@ class ExtensionGenerator:
         for line in lines:
             # Remove markdown code fences if present
             if line.strip().startswith("```"):
-                continue
-            
-            # Remove import statements (not allowed in sandbox)
-            if line.strip().startswith("import ") or line.strip().startswith("from "):
-                fixed_lines.append(f"# Removed: {line}")
                 continue
             
             fixed_lines.append(line)

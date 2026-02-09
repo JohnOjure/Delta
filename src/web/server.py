@@ -249,9 +249,27 @@ async def get_session_history(session_id: int):
 
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: int):
-    """Delete a session (optional, for management)."""
-    # Not yet implemented in ConversationManager but good to have endpoint ready
-    return {"success": False, "message": "Not implemented yet"}
+    """Delete a session and all its messages."""
+    agent = await get_agent()
+    if not agent._conversation:
+        raise HTTPException(503, "Conversation manager not initialized")
+    
+    deleted = await agent._conversation.delete_session(session_id)
+    return {"success": deleted}
+
+
+class SessionRenameRequest(BaseModel):
+    title: str
+
+@app.patch("/api/sessions/{session_id}")
+async def rename_session(session_id: int, request: SessionRenameRequest):
+    """Rename a session."""
+    agent = await get_agent()
+    if not agent._conversation:
+        raise HTTPException(503, "Conversation manager not initialized")
+    
+    renamed = await agent._conversation.rename_session(session_id, request.title)
+    return {"success": renamed}
 
 
 @app.get("/api/stats")

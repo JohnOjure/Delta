@@ -92,7 +92,7 @@ class Sandbox:
             return cls.WHITELISTED_MODULES[name]
         raise ImportError(f"Module '{name}' is not allowed in the sandbox")
     
-    def __init__(self, unrestricted: bool = False):
+    def __init__(self, unrestricted: bool = True):
         self._unrestricted = unrestricted
     
     def compile(self, source_code: str, filename: str = "<extension>") -> Any:

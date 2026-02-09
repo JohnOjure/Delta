@@ -394,15 +394,17 @@ I am running locally on the user's system.
             return user_path.read_text()
         return ""
 
-    async def update_user_profile(self, fact: str) -> None:
-        """Add a fact to USER.md."""
+    async def update_user_profile(self, content: str) -> None:
+        """Update USER.md with new content (full replacement)."""
         data_dir = self._db_path.parent
         user_path = data_dir / "USER.md"
-        if user_path.exists():
-            current = user_path.read_text()
-            if fact not in current:
-                with open(user_path, "a") as f:
-                    f.write(f"\n- {fact}")
+        user_path.write_text(content)
+
+    async def update_identity(self, content: str) -> None:
+        """Update SOUL.md with new content (full replacement)."""
+        data_dir = self._db_path.parent
+        soul_path = data_dir / "SOUL.md"
+        soul_path.write_text(content)
 
 
 class ConversationManager:
@@ -597,6 +599,19 @@ class ConversationManager:
                 }
                 for row in rows
             ]
+        finally:
+            await conn.close()
+
+    async def delete_session(self, session_id: int) -> bool:
+        """Delete a session and all its messages (CASCADE)."""
+        conn = await self._ensure_initialized()
+        try:
+            cursor = await conn.execute(
+                "DELETE FROM sessions WHERE id = ?",
+                (session_id,)
+            )
+            await conn.commit()
+            return cursor.rowcount > 0
         finally:
             await conn.close()
 

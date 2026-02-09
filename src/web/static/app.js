@@ -26,6 +26,7 @@ class DeltaApp {
         this.isRunning = false;
         this.chatMessages = JSON.parse(localStorage.getItem('delta_last_chat') || '[]');
         this.currentView = 'chat';
+        this.lastUserMessage = null;
 
         this.init();
     }
@@ -237,9 +238,6 @@ class DeltaApp {
     }
 
     async loadSession(sessionId) {
-        // Remove isRunning check to allow loading sessions while another runs in background
-        // if (this.isRunning) return; 
-
         try {
             const res = await fetch(`/api/sessions/${sessionId}/history`);
             const history = await res.json();
@@ -247,10 +245,20 @@ class DeltaApp {
             this.currentSessionId = sessionId;
             this.chatMessages = history;
 
-            // Update UI
+            // Batch render with DocumentFragment for speed
             this.elements.messages.innerHTML = '';
             this.elements.welcomeScreen.classList.add('hidden');
-            history.forEach(msg => this.renderMessage(msg.type, msg.content, msg.status, msg.timestamp));
+
+            const fragment = document.createDocumentFragment();
+            history.forEach(msg => {
+                const msgEl = this.createMessageElement(msg.type, msg.content, msg.status, msg.timestamp);
+                fragment.appendChild(msgEl);
+            });
+            this.elements.messages.appendChild(fragment);
+
+            // Defer syntax highlighting to next frame
+            requestAnimationFrame(() => this.highlightCodeBlocks());
+            this.scrollToBottom();
 
             // Update URL
             const url = new URL(window.location);
@@ -274,12 +282,15 @@ class DeltaApp {
         const goal = this.elements.messageInput.value.trim();
         if (!goal || this.isRunning) return;
 
+        this.lastUserMessage = goal;
+        const isFirstMessage = this.chatMessages.length === 0;
+
         // Ensure we have a session ID
         if (!this.currentSessionId) {
             const res = await fetch('/api/sessions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: goal.substring(0, 30) || 'New Chat' })
+                body: JSON.stringify({ title: goal.substring(0, 40) || 'New Chat' })
             });
             const session = await res.json();
             this.currentSessionId = session.id;
@@ -288,14 +299,17 @@ class DeltaApp {
             const url = new URL(window.location);
             url.searchParams.set('chat_id', session.id);
             window.history.pushState({}, '', url);
-            this.loadRecentChats(); // Refresh sidebar to show new chat
+            this.loadRecentChats();
+        } else if (isFirstMessage && this.currentSessionId) {
+            // Auto-rename the session with first real message
+            this.autoNameChat(this.currentSessionId, goal);
         }
 
         this.elements.welcomeScreen.classList.add('hidden');
         this.addMessage('user', goal);
 
         this.elements.messageInput.value = '';
-        this.elements.messageInput.style.height = 'auto'; // Reset height
+        this.elements.messageInput.style.height = 'auto';
 
         this.setRunning(true, 'Consulting Brain...');
         this.showTyping(true);
@@ -401,7 +415,11 @@ class DeltaApp {
         this.renderMessage(type, content, status, timestamp);
     }
 
-    renderMessage(type, content, status, timestamp) {
+    createMessageElement(type, content, status, timestamp) {
+        // Remove regenerate button from previous last agent message
+        const prevRegen = this.elements.messages.querySelector('.regenerate-btn');
+        if (prevRegen) prevRegen.remove();
+
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${type}`;
 
@@ -418,39 +436,66 @@ class DeltaApp {
 
         const meta = document.createElement('div');
         meta.className = 'message-status';
-        meta.textContent = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const parsedDate = timestamp ? new Date(timestamp) : new Date();
+        meta.textContent = isNaN(parsedDate.getTime()) ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : parsedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
         bubbleWrapper.appendChild(bubble);
         bubbleWrapper.appendChild(meta);
+
+        // Add regenerate button for the latest agent message
+        if (type === 'agent' && status !== 'info') {
+            const regenBtn = document.createElement('button');
+            regenBtn.className = 'regenerate-btn';
+            regenBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Regenerate`;
+            regenBtn.onclick = () => this.regenerateLastMessage();
+            bubbleWrapper.appendChild(regenBtn);
+        }
+
         msgDiv.appendChild(avatar);
         msgDiv.appendChild(bubbleWrapper);
+        return msgDiv;
+    }
 
-        this.elements.messages.appendChild(msgDiv);
+    renderMessage(type, content, status, timestamp) {
+        const msgEl = this.createMessageElement(type, content, status, timestamp);
+        this.elements.messages.appendChild(msgEl);
+        // Apply syntax highlighting to just-added element
+        msgEl.querySelectorAll('pre code[class*="language-"]').forEach(block => {
+            if (window.hljs) hljs.highlightElement(block);
+        });
         this.scrollToBottom();
     }
 
     formatMarkdown(text) {
         if (!text) return '';
 
-        // Configure marked options
+        // Configure marked with highlight.js integration
         marked.setOptions({
-            breaks: true, // Enable line breaks
-            gfm: true,    // Enable GitHub Flavored Markdown
+            breaks: true,
+            gfm: true,
             highlight: function(code, lang) {
-                return code; // We handle code blocks separately/later or let it be plain
+                if (window.hljs && lang && hljs.getLanguage(lang)) {
+                    try { return hljs.highlight(code, { language: lang }).value; } catch (e) {}
+                }
+                if (window.hljs) {
+                    try { return hljs.highlightAuto(code).value; } catch (e) {}
+                }
+                return code;
             }
         });
 
-        // 1. Pre-process specific Delta-style structures
-        
-        // Handle explicit Code Blocks to ensure they are preserved and styled
-        // We use a temporary placeholder to prevent marked from messing up our custom code block HTML
+        // Pre-process: extract code blocks to protect from mangling
         const codeBlocks = [];
         text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-            const cleanCode = this.escapeHtml(code.trim());
-            const displayLang = lang || 'python';
-            const placeholder = `__DELTA_CODE_BLOCK_${codeBlocks.length}__`;
-            
+            const displayLang = lang || 'text';
+            let highlighted = this.escapeHtml(code.trim());
+            if (window.hljs && lang && hljs.getLanguage(lang)) {
+                try { highlighted = hljs.highlight(code.trim(), { language: lang }).value; } catch (e) {}
+            } else if (window.hljs) {
+                try { highlighted = hljs.highlightAuto(code.trim()).value; } catch (e) {}
+            }
+
+            const placeholder = `%%DELTACB_${codeBlocks.length}%%`;
             codeBlocks.push(`
 <div class="code-block-wrapper">
     <div class="code-header">
@@ -460,53 +505,61 @@ class DeltaApp {
             Copy
         </button>
     </div>
-    <pre><code class="language-${displayLang}">${cleanCode}</code></pre>
+    <pre><code class="language-${displayLang} hljs">${highlighted}</code></pre>
 </div>`);
             return placeholder;
         });
 
-        // 2. Auto-detect and Pretty-print RAW JSON/Dicts
-        const jsonPattern = /(?:Return:\s*)?(\{[\s\S]{15,}\}|\[[\s\S]{15,}\])/g;
+        // Auto-detect raw JSON/dicts
+        const jsonPattern = /(?:Return:\s*)?({[\s\S]{15,}}|\[[\s\S]{15,}\])/g;
         text = text.replace(jsonPattern, (match) => {
-             // If it matches a placeholder, skip
-            if (match.includes('__DELTA_CODE_BLOCK_')) return match;
-            
+            if (match.includes('%%DELTACB_')) return match;
             try {
                 let jsonStr = match.trim();
                 if (jsonStr.startsWith('Return:')) jsonStr = jsonStr.replace('Return:', '').trim();
-                
-                 // Python dict fixups
                 jsonStr = jsonStr.replace(/'/g, '"')
                                  .replace(/(\W)True(\W)/g, '$1true$2')
                                  .replace(/(\W)False(\W)/g, '$1false$2')
                                  .replace(/(\W)None(\W)/g, '$1null$2');
-                                 
                 const obj = JSON.parse(jsonStr);
                 const prettyJson = JSON.stringify(obj, null, 2);
-                const placeholder = `__DELTA_CODE_BLOCK_${codeBlocks.length}__`;
+
+                let highlighted = this.escapeHtml(prettyJson);
+                if (window.hljs) {
+                    try { highlighted = hljs.highlight(prettyJson, { language: 'json' }).value; } catch (e) {}
+                }
+
+                const placeholder = `%%DELTACB_${codeBlocks.length}%%`;
                 codeBlocks.push(`
 <div class="code-block-wrapper">
     <div class="code-header"><span class="code-lang">json</span></div>
-    <pre><code class="language-json">${this.escapeHtml(prettyJson)}</code></pre>
+    <pre><code class="language-json hljs">${highlighted}</code></pre>
 </div>`);
                 return placeholder;
-            } catch (e) {
-                return match;
-            }
+            } catch (e) { return match; }
         });
 
-        // 3. Use marked for the rest (headers, bold, lists, etc.)
+        // Parse markdown
         let html = marked.parse(text);
 
-        // 4. Restore code blocks
-        codeBlocks.forEach((block, index) => {
-            html = html.replace(`__DELTA_CODE_BLOCK_${index}__`, block);
+        // Restore code blocks
+        codeBlocks.forEach((block, i) => {
+            html = html.replace(`%%DELTACB_${i}%%`, block);
         });
-        
-        // Remove surrounding <p> tags from placeholders if marked added them
+
+        // Unwrap code blocks from paragraphs
         html = html.replace(/<p>(<div class="code-block-wrapper">[\s\S]*?<\/div>)<\/p>/g, '$1');
 
         return html;
+    }
+
+    highlightCodeBlocks() {
+        if (!window.hljs) return;
+        this.elements.messages.querySelectorAll('pre code').forEach(block => {
+            if (!block.classList.contains('hljs')) {
+                hljs.highlightElement(block);
+            }
+        });
     }
 
     escapeHtml(str) {
@@ -720,19 +773,92 @@ class DeltaApp {
             sessions.forEach(session => {
                 const item = document.createElement('div');
                 item.className = 'history-item';
-                item.textContent = session.title || 'Untitled Chat';
                 item.dataset.id = session.id;
 
                 if (this.currentSessionId && session.id === this.currentSessionId) {
                     item.classList.add('active');
                 }
 
-                item.onclick = () => this.loadSession(session.id);
+                const title = document.createElement('span');
+                title.className = 'history-item-title';
+                title.textContent = session.title || 'Untitled Chat';
+                title.onclick = () => this.loadSession(session.id);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'history-delete-btn';
+                deleteBtn.innerHTML = '×';
+                deleteBtn.title = 'Delete chat';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    this.deleteChat(session.id);
+                };
+
+                item.appendChild(title);
+                item.appendChild(deleteBtn);
                 history.appendChild(item);
             });
 
         } catch (e) {
             console.error('Failed to load recent chats:', e);
+        }
+    }
+
+    async deleteChat(sessionId) {
+        if (!confirm('Delete this chat?')) return;
+        try {
+            await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+            if (this.currentSessionId === sessionId) {
+                this.startNewChat(false);
+            }
+            this.loadRecentChats();
+        } catch (e) {
+            console.error('Failed to delete chat:', e);
+        }
+    }
+
+    async autoNameChat(sessionId, goal) {
+        // Generate a proper title from the first message
+        const title = goal.length > 40 ? goal.substring(0, 37) + '...' : goal;
+        try {
+            await fetch(`/api/sessions/${sessionId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title })
+            });
+            this.loadRecentChats();
+        } catch (e) {
+            console.error('Failed to rename chat:', e);
+        }
+    }
+
+    async regenerateLastMessage() {
+        if (this.isRunning || !this.lastUserMessage) return;
+
+        // Remove the last agent message from UI and data
+        const messages = this.elements.messages.querySelectorAll('.message.agent');
+        if (messages.length > 0) {
+            const lastMsg = messages[messages.length - 1];
+            lastMsg.remove();
+            // Remove from chatMessages array
+            for (let i = this.chatMessages.length - 1; i >= 0; i--) {
+                if (this.chatMessages[i].type === 'agent') {
+                    this.chatMessages.splice(i, 1);
+                    break;
+                }
+            }
+            this.saveChatHistory();
+        }
+
+        // Re-send the last user message
+        this.setRunning(true, 'Regenerating...');
+        this.showTyping(true);
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'goal',
+                goal: this.lastUserMessage,
+                session_id: this.currentSessionId
+            }));
         }
     }
 
