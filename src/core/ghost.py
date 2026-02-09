@@ -142,8 +142,13 @@ class GhostMode:
         # Warmup
         await asyncio.sleep(5)
         
+        cycle_count = 0
+        optimization_interval = 10  # Run optimization every 10 cycles
+        
         while self.running:
             try:
+                cycle_count += 1
+                
                 # Gather system stats
                 stats = {
                     "cpu_percent": psutil.cpu_percent(interval=1),
@@ -183,6 +188,10 @@ class GhostMode:
                         except Exception as e:
                             pass  # Gemini analysis is optional
                 
+                # === AUTONOMOUS SELF-OPTIMIZATION ===
+                if cycle_count % optimization_interval == 0:
+                    await self._run_self_optimization()
+                
                 await asyncio.sleep(self.interval)
                 
             except asyncio.CancelledError:
@@ -190,6 +199,48 @@ class GhostMode:
             except Exception as e:
                 print(f"Ghost loop error: {e}")
                 await asyncio.sleep(60)
+    
+    async def _run_self_optimization(self):
+        """Autonomously check for optimization opportunities and fix them."""
+        try:
+            from .optimization import OptimizationEngine
+            
+            optimizer = OptimizationEngine()
+            suggestions = optimizer.analyze_performance()
+            
+            if not suggestions:
+                return  # No issues found
+            
+            print(f"👻 Self-Optimization: Found {len(suggestions)} improvement opportunities.")
+            
+            # Only auto-fix LOW severity issues without user approval
+            low_severity = [s for s in suggestions if s.severity == "low"]
+            high_severity = [s for s in suggestions if s.severity in ("medium", "high")]
+            
+            # Notify user about high-severity issues
+            for s in high_severity:
+                await self._propose_action(f"⚠️ Optimization needed: {s.suggested_action}")
+            
+            # Auto-execute low-severity optimizations
+            if low_severity and hasattr(self.agent, 'run'):
+                goal = "Perform these minor self-optimizations:\n"
+                for s in low_severity:
+                    goal += f"- {s.suggested_action}\n"
+                
+                print("👻 Auto-executing low-severity optimizations...")
+                try:
+                    result = await self.agent.run(goal)
+                    if result.success:
+                        print("👻 Self-optimization complete.")
+                    else:
+                        print(f"👻 Self-optimization failed: {result.message}")
+                except Exception as e:
+                    print(f"👻 Self-optimization error: {e}")
+                    
+        except ImportError:
+            pass  # OptimizationEngine not available
+        except Exception as e:
+            print(f"👻 Self-optimization check failed: {e}")
     
     def _check_local_anomalies(self, stats: dict) -> List[str]:
         """Check for anomalies using local rules."""

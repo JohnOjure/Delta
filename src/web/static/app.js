@@ -17,7 +17,9 @@ class DeltaApp {
             extensionsGrid: document.getElementById('extensions-grid'),
             views: document.querySelectorAll('.view'),
             navItems: document.querySelectorAll('.nav-item'),
-            newChatBtn: document.getElementById('new-chat-btn')
+            newChatBtn: document.getElementById('new-chat-btn'),
+            sidebar: document.querySelector('.sidebar'),
+            sidebarToggle: document.getElementById('sidebar-toggle')
         };
 
         this.ws = null;
@@ -49,6 +51,12 @@ class DeltaApp {
         }
 
         this.loadRecentChats();
+        
+        // Restore Sidebar State
+        const sidebarCollapsed = localStorage.getItem('delta_sidebar_collapsed') === 'true';
+        if (sidebarCollapsed) {
+            this.elements.sidebar.classList.add('collapsed');
+        }
     }
 
     connectWebSocket() {
@@ -82,6 +90,23 @@ class DeltaApp {
         // New Chat
         if (this.elements.newChatBtn) {
             this.elements.newChatBtn.addEventListener('click', () => this.startNewChat());
+        }
+
+        // Sidebar Toggle
+        if (this.elements.sidebarToggle && this.elements.sidebar) {
+            this.elements.sidebarToggle.addEventListener('click', () => {
+                this.elements.sidebar.classList.toggle('collapsed');
+            });
+        }
+
+        // Logo click expands sidebar when collapsed
+        const logo = document.querySelector('.logo');
+        if (logo && this.elements.sidebar) {
+            logo.addEventListener('click', () => {
+                if (this.elements.sidebar.classList.contains('collapsed')) {
+                    this.elements.sidebar.classList.remove('collapsed');
+                }
+            });
         }
 
         // Chat
@@ -126,7 +151,25 @@ class DeltaApp {
                     this.recognition.start();
                     micBtn.classList.add('active');
                 }
-            };
+                // Sidebar Toggle
+        if (this.elements.sidebarToggle) {
+            this.elements.sidebarToggle.addEventListener('click', () => {
+                this.elements.sidebar.classList.toggle('collapsed');
+                localStorage.setItem('delta_sidebar_collapsed', this.elements.sidebar.classList.contains('collapsed'));
+            });
+        }
+        
+        // Handle Sidebar Logo Click to Expand when collapsed
+        const logo = this.elements.sidebar.querySelector('.logo');
+        if (logo) {
+            logo.addEventListener('click', () => {
+                if (this.elements.sidebar.classList.contains('collapsed')) {
+                    this.elements.sidebar.classList.remove('collapsed');
+                    localStorage.setItem('delta_sidebar_collapsed', 'false');
+                }
+            });
+        }
+    };
         }
     }
 
@@ -265,7 +308,12 @@ class DeltaApp {
     handleServerMessage(data) {
         switch (data.type) {
             case 'thinking':
-                this.updateThinking(data.activity, data.details);
+                // Check if this is a code preview
+                if (data.state === 'code_preview' && data.code) {
+                    this.showCodePreview(data.extension_name, data.code, data.details);
+                } else {
+                    this.updateThinking(data.activity, data.details);
+                }
                 break;
             case 'result':
                 this.finishThinking(true);
@@ -278,6 +326,34 @@ class DeltaApp {
                 this.setRunning(false);
                 break;
         }
+    }
+    
+    showCodePreview(name, code, description) {
+        // Find or create current thinking process block
+        let currentProcess = this.elements.messages.querySelector('.thinking-process.active');
+        if (currentProcess) {
+            const logsContainer = currentProcess.querySelector('.thinking-logs');
+            if (logsContainer) {
+                // Add code preview block
+                const codeBlock = document.createElement('div');
+                codeBlock.className = 'code-preview-block';
+                codeBlock.innerHTML = `
+                    <div class="code-preview-header">
+                        <span class="code-preview-title">✨ Generated: ${name}</span>
+                        <span class="code-preview-desc">${description || ''}</span>
+                    </div>
+                    <pre class="code-preview-content"><code>${this.escapeHtml(code)}</code></pre>
+                `;
+                logsContainer.appendChild(codeBlock);
+                logsContainer.scrollTop = logsContainer.scrollHeight;
+            }
+        }
+    }
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     handleResult(data) {
@@ -329,9 +405,22 @@ class DeltaApp {
 
         // Code Blocks
         text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+            const cleanCode = this.escapeHtml(code.trim());
+            // Store code in data attribute for easy copying
+            const codeId = 'code-' + Math.random().toString(36).substr(2, 9);
+            
+            // We use a small script to handle the copy because onclick handlers in innerHTML are tricky with scoping
+            // Instead we'll delegate the event or use inline JS carefully
             return `<div class="code-block-wrapper">
-                <div class="code-header"><span>${lang || 'python'}</span></div>
-                <pre><code class="language-${lang || 'python'}">${this.escapeHtml(code.trim())}</code></pre>
+                <div class="code-header">
+                    <span class="code-lang">${lang || 'python'}</span>
+                    <button class="code-copy-btn" onclick="window.deltaApp.copyToClipboard(this)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                        Copy
+                    </button>
+                </div>
+                <pre><code class="language-${lang || 'python'}">${cleanCode}</code></pre>
+                <div class="code-content hidden">${this.escapeHtml(code.trim())}</div> 
             </div>`;
         });
 
@@ -595,6 +684,11 @@ class DeltaApp {
     }
 
     async saveSettings() {
+        const btn = document.getElementById('save-settings');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = '<span class="thinking-spinner" style="border-width: 2px; width: 14px; height: 14px;"></span> Saving...';
+        btn.disabled = true;
+
         const config = {
             user_name: document.getElementById('setting-name').value,
             model_name: document.getElementById('setting-model').value,
@@ -609,12 +703,63 @@ class DeltaApp {
                 body: JSON.stringify(config)
             });
             const result = await res.json();
+            
             if (result.success) {
-                document.getElementById('settings-modal').classList.add('hidden');
+                this.showToast('Configuration saved successfully', 'success');
+                setTimeout(() => {
+                    document.getElementById('settings-modal').classList.add('hidden');
+                }, 500);
+            } else {
+                this.showToast(result.message || 'Failed to save settings', 'error');
             }
         } catch (e) {
-            alert('Failed to save settings');
+            console.error(e);
+            this.showToast('Network error while saving settings', 'error');
+        } finally {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
         }
+    }
+
+    showToast(message, type = 'info') {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        
+        let icon = '';
+        if (type === 'success') icon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+        else if (type === 'error') icon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>';
+        else icon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
+
+        toast.innerHTML = `
+            <div class="toast-icon">${icon}</div>
+            <div class="toast-message">${this.escapeHtml(message)}</div>
+            <button class="toast-close">&times;</button>
+        `;
+
+        // Close button
+        toast.querySelector('.toast-close').onclick = () => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(10px) scale(0.95)';
+            setTimeout(() => toast.remove(), 200);
+        };
+
+        container.appendChild(toast);
+
+        // Animate in
+        requestAnimationFrame(() => {
+            toast.classList.add('visible');
+        });
+
+        // Auto remove
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.classList.remove('visible');
+                setTimeout(() => toast.remove(), 200);
+            }
+        }, 5000);
     }
 
     autoResizeInput() {
@@ -627,6 +772,25 @@ class DeltaApp {
 
     scrollToBottom() {
         this.elements.chatContainer.scrollTop = this.elements.chatContainer.scrollHeight;
+    }
+    copyToClipboard(btn) {
+        const wrapper = btn.closest('.code-block-wrapper');
+        const codeElement = wrapper.querySelector('code');
+        const text = codeElement.innerText; // Get text content
+        
+        navigator.clipboard.writeText(text).then(() => {
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
+            btn.classList.add('copied');
+            
+            setTimeout(() => {
+                btn.innerHTML = originalHtml;
+                btn.classList.remove('copied');
+            }, 2000);
+        }).catch(err => {
+            console.error('Failed to copy class content: ', err);
+            this.showToast('Failed to copy to clipboard', 'error');
+        });
     }
 }
 

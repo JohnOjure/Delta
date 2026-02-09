@@ -23,14 +23,17 @@ class TestConversationContext(unittest.TestCase):
         async def run_test():
             cm = ConversationManager(self.db_path)
             
+            # Create session
+            session_id = await cm.create_session("Test Session")
+            
             # Add messages
-            await cm.add_message("user", "Hello")
-            await cm.add_message("assistant", "Hi there")
-            await cm.add_message("tool", "Command executed successfully")
-            await cm.add_message("system", "System warning")
+            await cm.add_message("user", "Hello", session_id)
+            await cm.add_message("assistant", "Hi there", session_id)
+            await cm.add_message("tool", "Command executed successfully", session_id)
+            await cm.add_message("system", "System warning", session_id)
             
             # Get context
-            context = await cm.get_recent_context(limit=10)
+            context = await cm.get_recent_context(session_id, limit=10)
             
             print(f"\nContext Output:\n{context}")
             

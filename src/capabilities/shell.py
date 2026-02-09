@@ -9,9 +9,11 @@ This capability provides dynamic shell access, allowing the agent to:
 All commands are reviewed by a safety agent before execution.
 """
 
+
 import asyncio
 import subprocess
 import json
+import sys
 from typing import Any
 from google import genai
 
@@ -31,6 +33,10 @@ DANGEROUS_PATTERNS = [
     "wget -O- | sh",
     "curl | sh",
     "eval $(base64",
+    # Windows specific
+    "del /F /S /Q C:\\Windows",
+    "rd /s /q C:\\Windows",
+    "format c:",
 ]
 
 
@@ -78,8 +84,26 @@ Respond with EXACTLY this JSON format:
 }}"""
 
     def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
-        self._client = genai.Client(api_key=api_key)
+        self._api_key = api_key
+        self._client = None
         self._model_name = model
+        
+    def __getstate__(self):
+        """Exclude client from pickling."""
+        state = self.__dict__.copy()
+        state["_client"] = None
+        return state
+        
+    def __setstate__(self, state):
+        """Restore state."""
+        self.__dict__.update(state)
+        # Client will be recreated on first use
+        
+    def _get_client(self):
+        """Lazy load client."""
+        if self._client is None:
+            self._client = genai.Client(api_key=self._api_key)
+        return self._client
     
     async def review(self, command: str, context: str = "") -> dict:
         """Review a command for safety.
@@ -89,18 +113,19 @@ Respond with EXACTLY this JSON format:
         """
         # First check against hardcoded dangerous patterns
         for pattern in DANGEROUS_PATTERNS:
-            if pattern in command:
+            if pattern.lower() in command.lower():
                 return {
                     "allowed": False,
                     "risk_level": "critical",
                     "reason": f"Command contains dangerous pattern: {pattern}",
                     "suggested_modification": None
                 }
-        
+                
         prompt = self.SAFETY_PROMPT.format(command=command, context=context)
         
         try:
-            response = await self._client.aio.models.generate_content(
+            client = self._get_client()
+            response = await client.aio.models.generate_content(
                 model=self._model_name,
                 contents=prompt
             )
@@ -272,6 +297,7 @@ class PythonExecCapability(Capability):
         
         # Escape the code for shell
         escaped_code = code.replace('"', '\\"').replace('\n', '\\n')
-        command = f'python -c "{escaped_code}"'
+        # Use sys.executable to ensure we use the same python interpreter (venv)
+        command = f'"{sys.executable}" -c "{escaped_code}"'
         
         return await self._shell.execute(command=command, context=context)

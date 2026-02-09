@@ -8,6 +8,7 @@ All extension code runs through this sandbox, which:
 """
 
 from typing import Any
+import io
 from RestrictedPython import compile_restricted, safe_builtins
 from RestrictedPython.Eval import default_guarded_getattr, default_guarded_getitem
 from RestrictedPython.Guards import (

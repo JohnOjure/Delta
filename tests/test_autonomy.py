@@ -152,7 +152,7 @@ class TestAutonomy(unittest.IsolatedAsyncioTestCase):
                     "details": "Writing comment to agent.py",
                     "capabilities_needed": ["fs.write"],
                     "params": {
-                        "path": "/home/fluxx/Workspace/Delta/src/core/agent.py",
+                        "path": str(Path(__file__).parent.parent.resolve() / "src" / "core" / "agent.py"),
                         "content": "# Self-edited"
                     }
                 },
@@ -179,7 +179,7 @@ class TestAutonomy(unittest.IsolatedAsyncioTestCase):
         # Verify it called fs.write with the correct path
         mock_fs_write.execute.assert_called_once()
         call_args = mock_fs_write.execute.call_args[1]
-        self.assertIn("src/core/agent.py", call_args["path"])
+        self.assertIn("agent.py", call_args["path"])
 
 if __name__ == "__main__":
     unittest.main()

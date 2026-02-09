@@ -17,7 +17,7 @@ class TestSandbox:
 def extension_main():
     return 1 + 1
 """
-        result = self.sandbox.execute(code, {})
+        result, _ = self.sandbox.execute(code, {})
         assert result == 2
     
     def test_execute_with_return(self):
@@ -26,7 +26,7 @@ def extension_main():
 def extension_main():
     return {"value": 42}
 """
-        result = self.sandbox.execute(code, {})
+        result, _ = self.sandbox.execute(code, {})
         assert result == {"value": 42}
     
     def test_execute_with_bindings(self):
@@ -40,7 +40,7 @@ def extension_main(my_cap):
             call_count[0] += 1
             return "mocked"
         
-        result = self.sandbox.execute(code, {"my_cap": mock_capability})
+        result, _ = self.sandbox.execute(code, {"my_cap": mock_capability})
         
         assert call_count[0] == 1
         assert result == "mocked"
@@ -122,7 +122,7 @@ def extension_main():
         is_valid, _ = self.sandbox.validate_code(code)
         assert is_valid
         
-        result = self.sandbox.execute(code, {})
+        result, _ = self.sandbox.execute(code, {})
         
         assert result["dict"] == {"key": "value"}
         assert result["list"] == [1, 2, 3]

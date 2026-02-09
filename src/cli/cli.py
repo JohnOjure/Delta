@@ -140,6 +140,81 @@ def status():
 
 
 @cli.command()
+@click.option("--force", is_flag=True, help="Force optimization even if no issues detected")
+def optimize(force: bool):
+    """Run proactive self-optimization.
+    
+    Analyzes audit logs and fixes performance/reliability issues.
+    """
+    click.echo("Running self-optimization analysis...")
+    asyncio.run(_run_optimization(force))
+
+
+async def _run_optimization(force: bool):
+    """Execute optimization loop."""
+    from src.core.config import ConfigManager
+    from src.adapters.desktop import DesktopAdapter
+    from src.core.agent import Agent
+    from src.core.gemini_client import GeminiClient
+    from src.core.memory import Memory
+    from src.extensions.registry import ExtensionRegistry
+    from src.core.optimization import OptimizationEngine
+    
+    manager = ConfigManager()
+    config = manager.load()
+    
+    if not config or not config.api_key:
+        click.echo("Error: API key not configured.", err=True)
+        return
+
+    # 1. Analyze
+    optimizer = OptimizationEngine()
+    suggestions = optimizer.analyze_performance()
+    
+    if not suggestions and not force:
+        click.echo("✅ System is healthy. No optimizations needed.")
+        return
+        
+    click.echo(f"Found {len(suggestions)} optimization opportunities.")
+    for s in suggestions:
+        click.echo(f" - [{s.severity.upper()}] {s.suggested_action}")
+        
+    if not force and not click.confirm("\nDo you want to proceed with these optimizations?"):
+        return
+        
+    # 2. Construct Goal
+    goal = "Perform the following self-optimizations to improve system reliability and performance:\n"
+    for s in suggestions:
+        goal += f"- {s.suggested_action} (Addressing: {s.issue})\n"
+    
+    if not suggestions and force:
+        goal = "Analyze the codebase and perform general performance optimizations on the core agent loop."
+        
+    # 3. Initialize Agent
+    adapter = DesktopAdapter(
+        api_key=config.api_key,
+        data_directory=manager.config_path.parent / "data"
+    )
+    await adapter.initialize()
+    
+    gemini = GeminiClient(config.api_key, model=config.model_name)
+    registry = ExtensionRegistry(manager.config_path.parent / "data" / "extensions.db")
+    memory = Memory(manager.config_path.parent / "data" / "memory.db")
+    
+    agent = Agent(adapter, gemini, registry, memory=memory)
+    
+    click.echo("\nStarting optimization agent...")
+    result = await agent.run(goal)
+    
+    if result.success:
+        click.echo(f"\n✅ Optimization complete: {result.message}")
+    else:
+        click.echo(f"\n❌ Optimization failed: {result.message}", err=True)
+    
+    await adapter.shutdown()
+
+
+@cli.command()
 @click.option("--lines", "-n", default=50, help="Number of lines to show")
 def logs(lines: int):
     """Show recent Delta logs."""

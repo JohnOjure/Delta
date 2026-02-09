@@ -18,6 +18,9 @@ from src.core.memory import Memory, ConversationManager
 from .gemini_client import GeminiClient
 from .planner import Planner, Plan, ActionType, PlanStep
 from .generator import ExtensionGenerator
+from .safety import SafetyManager
+from .audit import AuditLogger
+from .optimization import OptimizationEngine
 
 
 class AgentState(str, Enum):
@@ -40,6 +43,8 @@ class AgentResult:
     steps_taken: int = 0
     requires_approval: bool = False
     proposed_alternative: dict = None
+    rollback_occurred: bool = False
+    opt_suggestions: list = None
 
 
 class Agent:
@@ -91,6 +96,11 @@ class Agent:
         self._planner = Planner()
         self._generator = ExtensionGenerator()
         self._introspector = ExtensionIntrospector()
+        
+        # Safety & Audit & Optimization
+        self._safety = SafetyManager.get_instance()
+        self._audit = AuditLogger.get_instance()
+        self._optimizer = OptimizationEngine()
         
         # State
         self._state = AgentState.IDLE
@@ -158,6 +168,20 @@ class Agent:
                         
                 except Exception as e:
                     print(f"  [Memory] Failed to load persistent context: {e}")
+            
+            # Continuous Improvement Check
+            try:
+                suggestions = self._optimizer.analyze_performance()
+                if suggestions:
+                    print(f"  [Optimization] Found {len(suggestions)} improvement opportunities.")
+                    opt_str = "\n## Self-Improvement Suggestions\n"
+                    for s in suggestions:
+                        opt_str += f"- {s.suggested_action} (Issue: {s.issue})\n"
+                    
+                    # Inject into environment string so Gemini sees it!
+                    env_str += f"\n{opt_str}"
+            except Exception as e:
+                print(f"  [Optimization] Analysis failed: {e}")
             
             # Get existing extensions
             extensions = await self._registry.list_all()
@@ -235,11 +259,63 @@ class Agent:
                     self._state = AgentState.EXECUTING
                     
                     if step.action == ActionType.COMPLETE:
+                        # SAFEGUARD: Premature Completion Check
+                        # If agent tries to complete on the very first iteration without doing anything,
+                        # AND the answer is generic ("Done"), force it to think again.
+                        if self._iteration == 1 and not extensions_created and step.details in ["Goal accomplished", "Done", "Completed", ""]:
+                            print(f"  [Safeguard] Premature completion detected. Forcing re-plan.")
+                            await self._emit_status("Refining", "Premature completion detected - verifying...")
+                            
+                            # Force a reflection instead
+                            self._state = AgentState.REFLECTING
+                            reflection = await self._gemini.reflect(
+                                "Agent tried to mark task complete immediately without any actions.",
+                                "Premature completion intercepted.",
+                                was_success=False
+                            )
+                            # Continue to next iteration (re-plan)
+                            continue
+
+                        # AUTONOMOUS VALIDATION (New Phase 9 Feature)
+                        # We verify that actual work was done if the task involved more than just answering a question
+                        if self._iteration > 1 or extensions_created:
+                           print("  Verifying completion quality...")
+                           await self._emit_status("Verifying", "Validating results against goal...")
+                           
+                           # Construct history summary
+                           history_summary = "\n".join([
+                               f"Iter {i+1}: {step.action} - {step.details}" 
+                               for i, step in enumerate(plan.steps)
+                               if step.action != ActionType.COMPLETE
+                           ])
+                           if extensions_created:
+                               history_summary += f"\nExtensions Created: {extensions_created}"
+                           
+                           validation = await self._gemini.verify_task_completion(
+                               goal,
+                               plan.analysis,
+                               history_summary
+                           )
+                           
+                           if not validation.get("verified", True):
+                               reason = validation.get("reason", "Unknown verification failure")
+                               missing = validation.get("missing_actions", [])
+                               print(f"  [Self-Correction] Verification failed: {reason}")
+                               await self._emit_status("Fixing", f"Self-correction: {reason}")
+                               
+                               # Inject failure into next iteration
+                               learnings_str += f"\n- CRITICAL: Previous attempt marked 'complete' but failed verification: {reason}. Missing: {missing}\n"
+                               
+                               # Force re-plan
+                               continue
+
                         print("  Goal completed.")
                         await self._emit_status("Completed", "Goal accomplished.")
+                        
                         # For Q&A, the actual answer is in step.details (per planning prompt)
                         # Only fall back to analysis if details is empty or generic
                         answer = step.details if step.details and step.details not in ["Goal accomplished", ""] else plan.analysis
+                        
                         # Record Agent Response
                         if self._conversation:
                             await self._conversation.add_message("assistant", answer, session_id)
@@ -337,6 +413,16 @@ Make sure to:
                                 )
                             
                             metadata, code = self._generator.parse_generation(gen_response)
+                            
+                            # Broadcast code preview for UI visualization (optional feature)
+                            if self._on_status:
+                                await self._on_status({
+                                    "state": "code_preview",
+                                    "activity": f"Generated: {metadata.name}",
+                                    "details": metadata.description,
+                                    "code": code,
+                                    "extension_name": metadata.name
+                                })
                             
                             # Syntax validation
                             is_valid, issues = self._generator.validate(code)
@@ -472,11 +558,52 @@ Make sure to:
                             ext_args = {k: v for k, v in step.details.items() 
                                          if k not in ['action', 'extension', 'extension_name']}
 
+                        # Safety: Backup critical files if extension accesses filesystem
+                        backup_id = None
+                        if "fs.write" in step.params.get("capabilities_needed", []) or "fs.write" in ext_name.lower() or True:
+                            # Heuristic: always backup critical files before extension execution for now to be safe
+                            # In production we might check extension capabilities metadata
+                            backup_id = self._safety.create_backup([
+                                "src/core/agent.py",
+                                "src/core/gemini_client.py",
+                                "src/vm/executor.py"
+                            ])
+
+                        start_time = asyncio.get_event_loop().time()
                         result = await self._executor.execute(
                             extension,
                             self._adapter.get_available_capabilities(),
                             arguments=ext_args
                         )
+                        duration = int((asyncio.get_event_loop().time() - start_time) * 1000)
+                        
+                        # Audit Log
+                        self._audit.log_execution(
+                            ext_name,
+                            extension.metadata.required_capabilities,
+                            result.value if result.success else result.error,
+                            result.success,
+                            duration
+                        )
+                        
+                        # Safety: Health Check
+                        if not self._safety.check_health():
+                            print(f"  🚨 CRITICAL: System health check failed after execution of {ext_name}!")
+                            await self._emit_status("Error", "System unstable! Initiating rollback...")
+                            
+                            if backup_id:
+                                restored = self._safety.restore_backup(backup_id)
+                                self._audit.log_rollback(backup_id, restored)
+                                print(f"  ✅ Rolled back {len(restored)} files.")
+                                
+                                return AgentResult(
+                                    success=False,
+                                    message=f"System integrity compromised by {ext_name}. Rolled back changes.",
+                                    rollback_occurred=True,
+                                    steps_taken=self._iteration
+                                )
+                            else:
+                                print(f"  ❌ No backup available!")
                         
                         # Record execution
                         await self._registry.record_execution(

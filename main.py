@@ -27,6 +27,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def print_banner():
+    """Print the Delta Agent startup banner."""
+    cyan = "\033[96m"
+    end = "\033[0m"
+    print(f"{cyan}")
+    print(r"""
+  _____       _ _        
+ |  __ \     | | |       
+ | |  | | ___| | |_ __ _ 
+ | |  | |/ _ \ | __/ _` |
+ | |__| |  __/ | || (_| |
+ |_____/ \___|_|\__\__,_|
+                         
+    SELF-EXTENDING AGENT 
+""")
+    print(f"{end}")
 
 from src.core.config import ConfigManager, UserConfig
 
@@ -278,9 +294,10 @@ For more details, see the README.md or documentation.
 
 
 def main():
+    print_banner()
     # Check for "help" command before argparse to override default behavior if needed, 
     # though argparse handles -h/--help. "delta help" ends up as goal="help".
-    if len(sys.argv) > 1 and sys.argv[1] == "help":
+    if len(sys.argv) > 1 and sys.argv[1].lower() == "help":
         print_help()
         sys.exit(0)
 
@@ -321,6 +338,12 @@ def main():
         help="Start the background daemon"
     )
     
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging and verbose output"
+    )
+    
     # Custom help flag to use our print_help
     parser.add_argument(
         "-h", "--help",
@@ -341,8 +364,16 @@ def main():
             import webbrowser
             from threading import Timer
             
+            # Redirect output to log file if not in debug mode
+            if not args.debug:
+                log_dir = Path.home() / ".delta" / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                sys.stdout = open(log_dir / "web_stdout.log", "a", encoding="utf-8")
+                sys.stderr = open(log_dir / "web_stderr.log", "a", encoding="utf-8")
+            
             url = "http://localhost:8000"
-            print(f"🌐 Starting Delta Web UI at {url}...")
+            if args.debug:
+                print(f"🌐 Starting Delta Web UI at {url}...")
             
             # Simple approach: threaded timer to open browser
             Timer(1.5, lambda: webbrowser.open(url)).start()
@@ -350,15 +381,21 @@ def main():
             # Import app directly to avoid re-import issues
             from src.web.server import app
             
-            # Run uvicorn synchronously (this starts its own event loop)
-            # Binding to 0.0.0.0 for cross-environment accessibility
-            uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+            # Run uvicorn synchronously
+            # LOGGING CONFIG: We want uvicorn to log to our redirected stdout/stderr or its own usage
+            uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info" if args.debug else "warning")
             return
         except ImportError:
+            # If we can't print to stdout because it's redirected and closed/failed, we might be in trouble.
+            # But usually we want to see this error.
+            # Restore stdout for critical errors if possible or just print
+            sys.stdout = sys.__stdout__
             print("❌ Error: Web dependencies not installed.")
             print("Run: pip install fastapi uvicorn websockets")
             sys.exit(1)
         except Exception as e:
+            if not args.debug:
+                 sys.stdout = sys.__stdout__
             print(f"❌ Error starting Web UI: {e}")
             sys.exit(1)
             

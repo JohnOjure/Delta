@@ -4,11 +4,11 @@
 
 Before installing Delta, ensure your system meets the following requirements:
 
-*   **Operating System**: Linux (Ubuntu 22.04+ / Debian 12+ recommended) or macOS (Ventura+).
-    *   *Note: Windows is supported via WSL2.*
-*   **Python**: Version 3.10 or higher.
-*   **Git**: Required for version control and updates.
-*   **Browser**: Chrome or Brave (optional, for web browsing capabilities).
+- **Operating System**: Linux (Ubuntu 22.04+ / Debian 12+ recommended), macOS (Ventura+), or Windows 10/11.
+  - _Note: Native Windows support is available via `install.bat`._
+- **Python**: Version 3.10 or higher.
+- **Git**: Required for version control and updates.
+- **Browser**: Chrome or Brave (optional, for web browsing capabilities).
 
 ## Automatic Installation (Recommended)
 
@@ -16,47 +16,64 @@ The "Magic Installer" handles all dependencies, virtual environment creation, an
 
 1.  **Clone the Repository**
     Open your terminal and run:
+
     ```bash
     git clone https://github.com/JohnOjure/Delta.git
     cd Delta
     ```
 
 2.  **Run the Installer**
-    Execute the setup script:
+
+    **Linux / macOS:**
+
     ```bash
     ./install.sh
     ```
 
+    **Windows:**
+
+    ```cmd
+    install.bat
+    ```
+
     **What this script does:**
-    *   Checks for Python 3 and Git.
-    *   Creates a `venv` (virtual environment) to keep your system clean.
-    *   Installs Python dependencies from `requirements.txt`.
-    *   Launches the **Onboarding Wizard**.
-    *   Creates a Desktop Entry (Linux) for easy access.
+    - Checks for Python 3 and Git.
+    - Creates a `venv` (virtual environment) to keep your system clean.
+    - Installs Python dependencies from `requirements.txt`.
+    - Launches the **Onboarding Wizard**.
+    - **Linux**: Creates a Desktop Entry and links `delta` to `~/.local/bin`.
+    - **Windows**:
+      - Created `delta.bat` for command-line use.
+      - Creates `delta-web.vbs` and `delta-daemon.vbs` for hidden background execution.
+      - Adds `delta` to User PATH (requires restart).
+      - Adds Web UI shortcut to Startup folder.
 
 3.  **Onboarding Wizard**
     The script will automatically launch `src/cli/setup.py`. Follow the prompts to:
-    *   Enter your **Google Gemini API Key**.
-    *   Choose your preferred model (Default: `gemini-3-pro-preview`).
-    *   Set up your User Name (for `USER.md`).
+    - Enter your **Google Gemini API Key**.
+    - Choose your preferred model (Default: `gemini-3-pro-preview`).
+    - Set up your User Name (for `USER.md`).
 
 ## Manual Installation
 
 If you prefer to set up everything manually:
 
 1.  **Clone & Verify**
+
     ```bash
-    git clone https://github.com/fluxx/delta.git
+    git clone https://github.com/JohnOjure/Delta.git
     cd delta
     ```
 
 2.  **Create Virtual Environment**
+
     ```bash
     python3 -m venv venv
     source venv/bin/activate
     ```
 
 3.  **Install Dependencies**
+
     ```bash
     pip install -r requirements.txt
     ```
@@ -70,44 +87,49 @@ If you prefer to set up everything manually:
     Content of `config.json`:
     ```json
     {
-        "api": {
-            "gemini_api_key": "YOUR_KEY_HERE"
-        },
-        "llm": {
-            "model_name": "gemini-3-pro-preview"
-        },
-        "user": {
-            "name": "User"
-        }
+      "api": {
+        "gemini_api_key": "YOUR_KEY_HERE"
+      },
+      "llm": {
+        "model_name": "gemini-3-pro-preview"
+      },
+      "user": {
+        "name": "User"
+      }
     }
     ```
 
 ## Usage
 
 ### 1. Web Interface (GUI)
-*   **Launch**: Run `./delta --web` or click the desktop shortcut.
-*   **Access**: Open `http://localhost:8000` in your browser.
+
+- **Launch**: Run `./delta --web` or click the desktop shortcut.
+- **Access**: Open `http://localhost:8000` in your browser.
 
 ### 2. Command Line Interface (CLI)
-*   **Interactive Mode**:
-    ```bash
-    ./delta
-    ```
-*   **Single Command**:
-    ```bash
-    ./delta --goal "Research quantum computing"
-    ```
+
+- **Interactive Mode**:
+  ```bash
+  ./delta
+  ```
+- **Single Command**:
+  ```bash
+  ./delta --goal "Research quantum computing"
+  ```
 
 ### 3. Background Daemon (Ghost Mode)
+
 To enable proactive monitoring (Heartbeat):
+
 ```bash
 ./delta --daemon
 ```
-*   Checks `~/.delta/HEARTBEAT.md` every 30 minutes.
-*   Monitors Downloads/Documents for new files to file.
+
+- Checks `~/.delta/HEARTBEAT.md` every 30 minutes.
+- Monitors Downloads/Documents for new files to file.
 
 ## Troubleshooting
 
-*   **`ModuleNotFoundError`**: Ensure you activated the venv (`source venv/bin/activate`).
-*   **`403/401 API Error`**: specificy a valid API key in `~/.delta/config.json`.
-*   **`404 Model Not Found`**: Ensure your API key has access to `gemini-3-pro-preview` or switch to `gemini-1.5-flash` in config.
+- **`ModuleNotFoundError`**: Ensure you activated the venv (`source venv/bin/activate`).
+- **`403/401 API Error`**: specificy a valid API key in `~/.delta/config.json`.
+- **`404 Model Not Found`**: Ensure your API key has access to `gemini-3-pro-preview` or switch to `gemini-1.5-flash` in config.

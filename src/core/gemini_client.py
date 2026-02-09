@@ -47,6 +47,7 @@ Extensions must:
 2. Use ONLY provided capabilities.
 3. Return meaningful data.
 4. Be written with professional-grade quality.
+5. Standard Python libraries (json, re, math, datetime, pathlib, etc.) ARE available and should be used.
 
 Example:
 ```python
@@ -589,5 +590,6 @@ Respond with JSON:
             print(f"Multimodal generation failed: {e}")
             # Fallback to text-only if image fails
             return await self.generate(prompt + "\n[Image upload failed]", expect_json=expect_json)
+
 
 

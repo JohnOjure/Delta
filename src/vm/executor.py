@@ -35,6 +35,21 @@ class ExecutionTimeout(Exception):
     pass
 
 
+def _run_in_process(result_queue, source_code, bindings, arguments, unrestricted):
+    """Function to run in the separate process."""
+    try:
+        # Create a new Sandbox instance in this process
+        # (can't share the parent's instance due to pickling)
+        from .sandbox import Sandbox
+        sandbox = Sandbox(unrestricted=unrestricted)
+        # Now returns (result, stdout_content)
+        result, stdout_content = sandbox.execute(source_code, bindings, arguments)
+        result_queue.put(("success", (result, stdout_content)))
+    except Exception as e:
+        import traceback
+        result_queue.put(("error", f"{type(e).__name__}: {e}\n{traceback.format_exc()}"))
+
+
 class Executor:
     """Executes extensions in the sandbox with resource limits.
     
@@ -129,19 +144,9 @@ class Executor:
         import multiprocessing
         import queue
         
-        def _run_in_process(result_queue, source_code, bindings, arguments, unrestricted):
-            """Function to run in the separate process."""
-            try:
-                # Create a new Sandbox instance in this process
-                # (can't share the parent's instance due to pickling)
-                from .sandbox import Sandbox
-                sandbox = Sandbox(unrestricted=unrestricted)
-                # Now returns (result, stdout_content)
-                result, stdout_content = sandbox.execute(source_code, bindings, arguments)
-                result_queue.put(("success", (result, stdout_content)))
-            except Exception as e:
-                import traceback
-                result_queue.put(("error", f"{type(e).__name__}: {e}\n{traceback.format_exc()}"))
+        # Create a new Sandbox instance in this process
+        # (can't share the parent's instance due to pickling)
+        # _run_in_process is now defined at module level
         
         # Create a queue for inter-process communication
         result_queue = multiprocessing.Queue()

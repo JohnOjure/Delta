@@ -6,6 +6,41 @@ from src.models.extension import ExtensionRecord
 from src.capabilities.base import Capability
 
 
+class AsyncCapabilityWrapper:
+    """Wrapper to run async capabilities in a synchronous context (pickleable)."""
+    
+    def __init__(self, capability):
+        self.capability = capability
+        
+    def __call__(self, **kwargs):
+        import asyncio
+        import concurrent.futures
+        
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = None
+            
+        if loop and loop.is_running():
+            # ongoing loop - run in thread pool
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    lambda: asyncio.run(self.run_cap(**kwargs))
+                )
+                return future.result()
+        else:
+            # no loop or not running - valid to use asyncio.run
+            return asyncio.run(self.run_cap(**kwargs))
+
+    async def run_cap(self, **kwargs):
+        """Helper to run the capability and check result."""
+        result = await self.capability.execute(**kwargs)
+        if result.success:
+            return result.value
+        else:
+            raise RuntimeError(f"Capability error: {result.error}")
+
+
 class ExtensionLoader:
     """Loads and prepares extensions for execution.
     
@@ -81,36 +116,9 @@ class ExtensionLoader:
                 
                 # Check if it's a Capability object or a plain callable
                 if isinstance(cap, Capability):
-                    # Wrapper that converts async Capability to sync (works in thread pool)
-                    def make_wrapper(capability):
-                        def wrapper(**kwargs):
-                            import asyncio
-                            # Get or create event loop for this thread
-                            try:
-                                loop = asyncio.get_event_loop()
-                                if loop.is_running():
-                                    # We're in an async context, need to run in new loop
-                                    import concurrent.futures
-                                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                                        future = pool.submit(
-                                            lambda: asyncio.run(capability.execute(**kwargs))
-                                        )
-                                        result = future.result()
-                                else:
-                                    result = loop.run_until_complete(capability.execute(**kwargs))
-                            except RuntimeError:
-                                # No event loop exists in this thread, create one
-                                result = asyncio.run(capability.execute(**kwargs))
-                            
-                            if result.success:
-                                return result.value
-                            else:
-                                raise RuntimeError(f"Capability error: {result.error}")
-                        return wrapper
-                    
-                    # Use underscores for binding name: fs.read -> fs_read
+                    # Use pickleable wrapper class
                     binding_name = cap_name.replace(".", "_")
-                    bindings[binding_name] = make_wrapper(cap)
+                    bindings[binding_name] = AsyncCapabilityWrapper(cap)
                 else:
                     # It's a plain callable (e.g., test mock function)
                     binding_name = cap_name.replace(".", "_")

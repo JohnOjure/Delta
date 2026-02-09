@@ -390,14 +390,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     # Create status callback for real-time thinking updates
                     async def on_status(status):
-                        await manager.broadcast({
+                        broadcast_data = {
                             "type": "thinking",
                             "state": status.get("state", ""),
                             "activity": status.get("activity", ""),
                             "details": status.get("details", ""),
                             "iteration": status.get("iteration", 0),
                             "timestamp": datetime.utcnow().isoformat()
-                        })
+                        }
+                        # Include code preview if present
+                        if status.get("code"):
+                            broadcast_data["code"] = status.get("code")
+                            broadcast_data["extension_name"] = status.get("extension_name", "")
+                        await manager.broadcast(broadcast_data)
                     
                     agent = await get_agent()
                     agent._on_status = on_status  # Attach callback
