@@ -403,3 +403,210 @@ I am running locally on the user's system.
             if fact not in current:
                 with open(user_path, "a") as f:
                     f.write(f"\n- {fact}")
+
+
+class ConversationManager:
+    """Manages persistent conversation history."""
+    
+    def __init__(self, db_path: Path):
+        self._db_path = db_path
+    
+    async def _ensure_initialized(self) -> aiosqlite.Connection:
+        """Initialize database if needed."""
+        conn = await aiosqlite.connect(self._db_path)
+        
+        # Enable foreign keys
+        await conn.execute("PRAGMA foreign_keys = ON;")
+        
+        # Create sessions table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        """)
+        
+        # Check if conversations table exists and has session_id
+        cursor = await conn.execute("PRAGMA table_info(conversations)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        
+        if columns and "session_id" not in columns:
+            # Migration: Drop old table (simple approach for dev)
+            # In a real app, we'd migrate data to a default session
+            await conn.execute("DROP TABLE conversations")
+            
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+        """)
+        
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversations_session 
+            ON conversations(session_id, timestamp DESC);
+        """)
+        
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_sessions_updated 
+            ON sessions(updated_at DESC);
+        """)
+        
+        await conn.commit()
+        return conn
+
+    async def create_session(self, title: str = "New Chat") -> int:
+        """Create a new conversation session."""
+        conn = await self._ensure_initialized()
+        try:
+            now = datetime.utcnow().isoformat() + "Z"
+            cursor = await conn.execute(
+                "INSERT INTO sessions (title, created_at, updated_at) VALUES (?, ?, ?)",
+                (title, now, now)
+            )
+            await conn.commit()
+            return cursor.lastrowid
+        finally:
+            await conn.close()
+            
+    async def rename_session(self, session_id: int, new_title: str) -> bool:
+        """Rename a session."""
+        conn = await self._ensure_initialized()
+        try:
+            now = datetime.utcnow().isoformat() + "Z"
+            cursor = await conn.execute(
+                "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+                (new_title, now, session_id)
+            )
+            await conn.commit()
+            return cursor.rowcount > 0
+        finally:
+            await conn.close()
+
+    async def get_sessions(self, limit: int = 20) -> list[dict]:
+        """Get recent sessions."""
+        conn = await self._ensure_initialized()
+        try:
+            cursor = await conn.execute(
+                "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC LIMIT ?",
+                (limit,)
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "title": row[1],
+                    "created_at": row[2],
+                    "updated_at": row[3]
+                }
+                for row in rows
+            ]
+        finally:
+            await conn.close()
+
+    async def add_message(self, role: str, content: str, session_id: int) -> None:
+        """Add a message to the conversation history."""
+        if not session_id:
+            # Fallback for legacy calls or errors - create a default session or log error
+            # For now, simplistic handling: create a temp session if needed, 
+            # but ideally caller should provide session_id
+            return 
+            
+        conn = await self._ensure_initialized()
+        try:
+            now = datetime.utcnow().isoformat() + "Z"
+            
+            # Insert message
+            await conn.execute(
+                "INSERT INTO conversations (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                (session_id, role, content, now)
+            )
+            
+            # Update session timestamp
+            await conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                (now, session_id)
+            )
+            
+            await conn.commit()
+        finally:
+            await conn.close()
+
+    async def get_recent_context(self, session_id: int, limit: int = 10) -> str:
+        """Get recent conversation context as a formatted string."""
+        if not session_id:
+            return ""
+            
+        conn = await self._ensure_initialized()
+        try:
+            # Get latest N messages for this session
+            cursor = await conn.execute(
+                "SELECT role, content FROM conversations WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?",
+                (session_id, limit)
+            )
+            rows = await cursor.fetchall()
+            
+            if not rows:
+                return ""
+            
+            # Reverse to chronological order (oldest first)
+            rows.reverse()
+            
+            context_parts = []
+            for role, content in rows:
+                if role == "user":
+                    prefix = "User"
+                elif role == "assistant":
+                    prefix = "Delta"
+                elif role == "tool":
+                    prefix = "Tool Output"
+                elif role == "system":
+                    prefix = "System"
+                else:
+                    prefix = role.capitalize()
+                
+                context_parts.append(f"{prefix}: {content}")
+            
+            return "\n".join(context_parts)
+        finally:
+            await conn.close()
+            
+    async def get_session_history(self, session_id: int) -> list[dict]:
+        """Get full history for a session (for UI)."""
+        conn = await self._ensure_initialized()
+        try:
+            cursor = await conn.execute(
+                "SELECT role, content, timestamp, id FROM conversations WHERE session_id = ? ORDER BY timestamp ASC",
+                (session_id,)
+            )
+            rows = await cursor.fetchall()
+            
+            return [
+                {
+                    "type": row[0], # client expects 'type' (user/agent)
+                    "content": row[1],
+                    "timestamp": row[2],
+                    "id": row[3],
+                    "status": "success" if row[0] == "assistant" else "" # infer status
+                }
+                for row in rows
+            ]
+        finally:
+            await conn.close()
+
+    async def clear_history(self) -> None:
+        """Clear all conversation history."""
+        conn = await self._ensure_initialized()
+        try:
+            await conn.execute("DELETE FROM conversations")
+            await conn.execute("DELETE FROM sessions")
+            await conn.commit()
+        finally:
+            await conn.close()
+

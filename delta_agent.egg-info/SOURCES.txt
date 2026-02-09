@@ -58,7 +58,9 @@ src/voice/__init__.py
 src/voice/voice.py
 src/web/__init__.py
 src/web/server.py
+tests/test_agent_fallback.py
 tests/test_agent_logic.py
+tests/test_autonomy.py
 tests/test_capabilities.py
 tests/test_cli.py
 tests/test_daemon.py
@@ -67,6 +69,8 @@ tests/test_executor.py
 tests/test_ghost.py
 tests/test_hotkey.py
 tests/test_integration_real.py
+tests/test_memory_context.py
 tests/test_registry.py
 tests/test_sandbox.py
+tests/test_stdout.py
 tests/test_voice.py

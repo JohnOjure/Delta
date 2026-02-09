@@ -190,90 +190,132 @@ class Sandbox:
         self,
         source_code: str,
         capability_bindings: dict[str, Any] = None,
+        arguments: dict[str, Any] = None,
         entry_point: str = "extension_main"
-    ) -> Any:
+    ) -> tuple[Any, str]:
         """Execute code in the sandbox.
         
         Args:
             source_code: Python source code
             capability_bindings: Capabilities to inject
+            arguments: Arguments to pass to the entry point
             entry_point: Function to call after module execution
             
         Returns:
-            Result of calling the entry point function
+            Tuple of (Result of calling the entry point function, captured stdout)
         """
-        # Compile
-        code = self.compile(source_code)
+        import sys
         
-        if self._unrestricted:
-            # Unrestricted Execution Environment
-            # We still provide capabilities, but we don't restrict builtins
-            execution_globals = {
-                "__builtins__": __builtins__,  # Full builtins access
-            }
-            if capability_bindings:
-                execution_globals.update(capability_bindings)
+        # Use TeeIO to capture and print simultaneously
+        # We need to handle the import inside the method to avoid circular imports if any
+        # or path issues if src/utils/io.py is not yet loaded
+        import sys
+        
+        # Inline TeeIO to avoid complex import issues within sandbox context
+        class TeeIO:
+            """Writes to a buffer and the original stream."""
+            def __init__(self, original_stream):
+                self.original_stream = original_stream
+                self.buffer = io.StringIO()
+                
+            def write(self, s):
+                self.original_stream.write(s)
+                self.original_stream.flush() # Ensure real-time output
+                return self.buffer.write(s)
+                
+            def flush(self):
+                self.original_stream.flush()
+                self.buffer.flush()
             
-            execution_locals = {}
-            
-            try:
-                # Execute module
-                exec(code, execution_globals, execution_locals)
-                
-                # Find entry point
-                if entry_point not in execution_locals:
-                     raise SandboxError(f"Entry point '{entry_point}' not found.")
-                
-                entry_func = execution_locals[entry_point]
-                
-                if not callable(entry_func):
-                    raise SandboxError(f"Entry point '{entry_point}' is not callable")
-                
-                # Call entry point
-                if capability_bindings:
-                    return entry_func(**capability_bindings)
-                else:
-                    return entry_func()
-                    
-            except Exception as e:
-                # In unrestricted mode, we still want to wrap errors as SandboxError 
-                # for consistency in Executor
-                raise SandboxError(f"Execution error: {type(e).__name__}: {e}")
-
-        # Restricted Execution Path
-        restricted_globals = self.create_restricted_globals(capability_bindings)
-        restricted_locals = {}
+            def getvalue(self):
+                return self.buffer.getvalue()
+        
+        stdout_capture = TeeIO(sys.stdout)
+        
+        from contextlib import redirect_stdout
         
         try:
-            # Execute the module (defines functions)
-            exec(code, restricted_globals, restricted_locals)
-            
-            # Find and call the entry point
-            if entry_point not in restricted_locals:
-                raise SandboxError(
-                    f"Entry point '{entry_point}' not found. "
-                    f"Defined names: {list(restricted_locals.keys())}"
-                )
-            
-            entry_func = restricted_locals[entry_point]
-            
-            if not callable(entry_func):
-                raise SandboxError(f"Entry point '{entry_point}' is not callable")
-            
-            # Call with capability bindings as kwargs
-            if capability_bindings:
-                result = entry_func(**capability_bindings)
-            else:
-                result = entry_func()
-            
-            return result
-            
-        except SecurityViolation:
-            raise
-        except SandboxError:
-            raise
+            with redirect_stdout(stdout_capture):
+                # Compile
+                code = self.compile(source_code)
+                
+                if self._unrestricted:
+                    # Unrestricted Execution Environment
+                    execution_globals = {
+                        "__builtins__": __builtins__,  # Full builtins access
+                    }
+                    if capability_bindings:
+                        execution_globals.update(capability_bindings)
+                    
+                    execution_locals = {}
+                    
+                    try:
+                        # Execute module
+                        exec(code, execution_globals, execution_locals)
+                        
+                        # Find entry point
+                        if entry_point not in execution_locals:
+                             raise SandboxError(f"Entry point '{entry_point}' not found.")
+                        
+                        entry_func = execution_locals[entry_point]
+                        if not callable(entry_func):
+                            raise SandboxError(f"Entry point '{entry_point}' is not callable")
+                        
+                        # Call entry point
+                        call_kwargs = {}
+                        if capability_bindings:
+                            call_kwargs.update(capability_bindings)
+                        if arguments:
+                            call_kwargs.update(arguments)
+                            
+                        result = entry_func(**call_kwargs)
+                        return result, stdout_capture.getvalue()
+                            
+                    except Exception as e:
+                        raise SandboxError(f"Execution error: {type(e).__name__}: {e}")
+
+                # Restricted Execution Path
+                restricted_globals = self.create_restricted_globals(capability_bindings)
+                restricted_locals = {}
+                
+                try:
+                    # Execute the module (defines functions)
+                    exec(code, restricted_globals, restricted_locals)
+                    
+                    # Find and call the entry point
+                    if entry_point not in restricted_locals:
+                        raise SandboxError(
+                            f"Entry point '{entry_point}' not found. "
+                            f"Defined names: {list(restricted_locals.keys())}"
+                        )
+                    
+                    entry_func = restricted_locals[entry_point]
+                    
+                    if not callable(entry_func):
+                        raise SandboxError(f"Entry point '{entry_point}' is not callable")
+                    
+                    # Call with capability bindings + arguments as kwargs
+                    call_kwargs = {}
+                    if capability_bindings:
+                        call_kwargs.update(capability_bindings)
+                    if arguments:
+                        call_kwargs.update(arguments)
+                        
+                    result = entry_func(**call_kwargs)
+                    
+                    return result, stdout_capture.getvalue()
+                    
+                except SecurityViolation:
+                    raise
+                except SandboxError:
+                    raise
+                except Exception as e:
+                    raise SandboxError(f"Execution error: {type(e).__name__}: {e}")
+                    
         except Exception as e:
-            raise SandboxError(f"Execution error: {type(e).__name__}: {e}")
+            if isinstance(e, SandboxError):
+                raise
+            raise SandboxError(f"Execution failed: {e}")
     
     def validate_code(self, source_code: str) -> tuple[bool, list[str]]:
         """Validate code without executing it."""

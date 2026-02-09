@@ -213,7 +213,8 @@ Analyze system metrics and decide if the user needs to be alerted.
         self,
         goal: str,
         environment_info: str,
-        available_extensions: str = ""
+        available_extensions: str = "",
+        conversation_context: str = ""
     ) -> dict:
         """Create a plan to achieve a goal.
         
@@ -221,6 +222,7 @@ Analyze system metrics and decide if the user needs to be alerted.
             goal: What to accomplish
             environment_info: Current environment description
             available_extensions: List of existing extensions
+            conversation_context: Recent conversation history
             
         Returns:
             Plan as a structured dict
@@ -229,6 +231,9 @@ Analyze system metrics and decide if the user needs to be alerted.
         
         context = f"""## Environment
 {environment_info}
+
+## Conversation History
+{conversation_context or "No recent conversation."}
 
 ## Available Extensions
 {available_extensions or "No extensions registered yet."}

@@ -14,7 +14,7 @@ from src.adapters.base import BaseAdapter
 from src.extensions.registry import ExtensionRegistry
 from src.extensions.introspection import ExtensionIntrospector
 from src.vm.executor import Executor
-from src.core.memory import Memory
+from src.core.memory import Memory, ConversationManager
 from .gemini_client import GeminiClient
 from .planner import Planner, Plan, ActionType, PlanStep
 from .generator import ExtensionGenerator
@@ -83,6 +83,9 @@ class Agent:
         self._max_iterations = max_iterations
         self._on_status = on_status
         
+        # Initialize ConversationManager if memory is available
+        self._conversation = ConversationManager(memory._db_path) if memory else None
+        
         # Components
         self._executor = Executor(adapter.get_resource_limits())
         self._planner = Planner()
@@ -127,8 +130,14 @@ class Agent:
         self._current_goal = goal
         self._iteration = 0
         extensions_created = []
+        last_created_extension = None
         
         print(f"\n[Goal] {goal}\n")
+        
+        # Record User Message
+        if self._conversation:
+            await self._conversation.add_message("user", goal)
+        
         
         try:
             # Get environment info for context
@@ -188,7 +197,12 @@ class Agent:
                     context_ext_str = ext_str + "\n" + learnings_str
                 
                 try:
-                    plan_response = await self._gemini.plan(goal, env_str, context_ext_str)
+                    # Get conversation context
+                    conv_context = ""
+                    if self._conversation:
+                        conv_context = await self._conversation.get_recent_context(limit=10)
+                        
+                    plan_response = await self._gemini.plan(goal, env_str, context_ext_str, conv_context)
                     plan = self._planner.parse_plan(plan_response)
                 except Exception as e:
                     # Intelligent Model Switching
@@ -226,6 +240,10 @@ class Agent:
                         # For Q&A, the actual answer is in step.details (per planning prompt)
                         # Only fall back to analysis if details is empty or generic
                         answer = step.details if step.details and step.details not in ["Goal accomplished", ""] else plan.analysis
+                        # Record Agent Response
+                        if self._conversation:
+                            await self._conversation.add_message("assistant", answer)
+                            
                         return AgentResult(
                             success=True,
                             message="Goal accomplished",
@@ -376,6 +394,7 @@ Make sure to:
                             # NOW register the validated extension
                             record = await self._registry.register(metadata, code)
                             extensions_created.append(metadata.name)
+                            last_created_extension = metadata.name
                             print(f"    Registered: {metadata.name} (validated)")
                             await self._emit_status("Success", f"Created extension: {metadata.name}")
                             
@@ -420,6 +439,10 @@ Make sure to:
                                     "context": f"Failed approach: {step.details}"
                                 }
                             )
+                        
+                        # Force re-planning to use the new extension
+                        print("    Extension created. Re-planning to use it...")
+                        break
                     
                     elif step.action == ActionType.EXECUTE_EXTENSION:
                         ext_name = step.extension_name or step.details.split()[0]
@@ -428,13 +451,31 @@ Make sure to:
                         
                         extension = await self._registry.get_by_name(ext_name)
                         if not extension:
-                            print(f"    Extension not found: {ext_name}")
-                            await self._emit_status("Error", f"Extension not found: {ext_name}")
-                            continue
+                            # Intelligent Fallback: Check if we just created an extension
+                            if last_created_extension:
+                                print(f"    Extension '{ext_name}' not found. Using recently created '{last_created_extension}' instead.")
+                                await self._emit_status("Recovering", f"Using '{last_created_extension}' instead of '{ext_name}'")
+                                ext_name = last_created_extension
+                                extension = await self._registry.get_by_name(ext_name)
+                            
+                            if not extension:
+                                print(f"    Extension not found: {ext_name}")
+                                await self._emit_status("Error", f"Extension not found: {ext_name}")
+                                continue
                         
+                        # Extract implementation arguments
+                        ext_args = {}
+                        if step.params and isinstance(step.params, dict):
+                            ext_args = step.params
+                        elif isinstance(step.details, dict):
+                             # Legacy: extract from details dict
+                            ext_args = {k: v for k, v in step.details.items() 
+                                         if k not in ['action', 'extension', 'extension_name']}
+
                         result = await self._executor.execute(
                             extension,
-                            self._adapter.get_available_capabilities()
+                            self._adapter.get_available_capabilities(),
+                            arguments=ext_args
                         )
                         
                         # Record execution
@@ -445,7 +486,17 @@ Make sure to:
                         )
                         
                         if result.success:
+                            # Add to conversation history
+                            if self._conversation:
+                                # Include both return value and stdout
+                                output_msg = f"Extension '{ext_name}' output:\nReturn: {str(result.value)[:1000]}"
+                                if result.output:
+                                    output_msg += f"\nLogs:\n{result.output[:4000]}"
+                                await self._conversation.add_message("tool", output_msg)
+                            
                             print(f"    Result: {str(result.value)[:100]}...")
+                            if result.output:
+                                print(f"    Logs: {result.output[:200]}...")
                         else:
                             print(f"    Error: {result.error}")
                             await self._emit_status("Error", f"Execution failed: {result.error}")
@@ -473,6 +524,10 @@ Make sure to:
                                 image_data=image_data
                             )
                             print(f"    Reflection: {reflection.get('assessment', '')[:100]}...")
+                        
+                        # Force re-planning to observe results
+                        print("    Action executed. Re-planning to observe results...")
+                        break
                     
                     elif step.action == ActionType.USE_CAPABILITY:
                         # Direct capability invocation
@@ -525,6 +580,10 @@ Make sure to:
                         
                         if result.success:
                             value = result.value
+                            # Add to conversation history
+                            if self._conversation:
+                                await self._conversation.add_message("tool", f"Capability '{cap_name}' output: {str(value)[:1000]}")
+                                
                             if isinstance(value, list):
                                 print(f"    Result ({len(value)} items):")
                                 for item in value[:20]:
@@ -535,6 +594,10 @@ Make sure to:
                                 print(f"    Result: {str(value)[:200]}")
                         else:
                             print(f"    Error: {result.error}")
+                            
+                        # Force re-planning to observe results
+                        print("    Capability executed. Re-planning to observe results...")
+                        break
                     
                     elif step.action == ActionType.REFLECT:
                         self._state = AgentState.REFLECTING
@@ -563,9 +626,16 @@ Make sure to:
                         except Exception as e:
                             print(f"  [Memory] Failed to store learning: {e}")
                     
+                    response_text = reflection.get("assessment", "Goal completed.")
+                    
+                    # Record Agent Response
+                    if self._conversation:
+                        await self._conversation.add_message("assistant", response_text)
+                        
                     return AgentResult(
                         success=True,
                         message="Plan executed",
+                        response=response_text,
                         extensions_created=extensions_created,
                         steps_taken=self._iteration
                     )
@@ -619,7 +689,8 @@ Make sure to:
         
         result = await self._executor.execute(
             extension,
-            self._adapter.get_available_capabilities()
+            self._adapter.get_available_capabilities(),
+            arguments={} # No args for manual run for now, or add to method sig if needed
         )
         
         await self._registry.record_execution(

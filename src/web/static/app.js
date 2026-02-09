@@ -29,17 +29,26 @@ class DeltaApp {
     }
 
     init() {
+        this.currentSessionId = null;
         this.connectWebSocket();
         this.bindEvents();
-        this.loadRecentChats();
+
+        // Check URL for session ID
+        const urlParams = new URLSearchParams(window.location.search);
+        const chatId = urlParams.get('chat_id');
+
         this.loadSettings();
         this.autoResizeInput();
 
-        // Restore previous chat if any
-        if (this.chatMessages.length > 0) {
-            this.elements.welcomeScreen.classList.add('hidden');
-            this.chatMessages.forEach(msg => this.renderMessage(msg.type, msg.content, msg.status, msg.timestamp));
+        if (chatId) {
+            this.loadSession(parseInt(chatId));
+        } else {
+            // Check if we should start fresh or load last
+            // For now, let's just show history and wait for user action
+            this.startNewChat(false); // false = don't create ID yet, just clear UI
         }
+
+        this.loadRecentChats();
     }
 
     connectWebSocket() {
@@ -139,38 +148,117 @@ class DeltaApp {
         }
     }
 
-    startNewChat() {
-        if (this.isRunning) return; // Don't interrupt active mission
+    async startNewChat(createNow = true) {
+        if (this.isRunning) return;
 
-        // Clear state
+        this.currentSessionId = null;
         this.chatMessages = [];
-        this.saveChatHistory();
 
         // Reset UI
         this.elements.messages.innerHTML = '';
         this.elements.welcomeScreen.classList.remove('hidden');
         this.elements.messageInput.value = '';
-        this.elements.messageInput.style.height = 'auto';
+        this.elements.messageInput.style.height = 'auto'; // Reset height
 
-        // Switch to chat view if not already there
+        // Update URL
+        const url = new URL(window.location);
+        url.searchParams.delete('chat_id');
+        window.history.pushState({}, '', url);
+
         this.switchView('chat');
+
+        // Optionally create the session immediately on backend
+        if (createNow) {
+            try {
+                const res = await fetch('/api/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: 'New Chat' })
+                });
+                const session = await res.json();
+                this.currentSessionId = session.id;
+
+                // Update URL with new ID
+                url.searchParams.set('chat_id', session.id);
+                window.history.pushState({}, '', url);
+
+                // Refresh sidebar
+                this.loadRecentChats();
+            } catch (e) {
+                console.error('Failed to create session:', e);
+            }
+        }
+    }
+
+    async loadSession(sessionId) {
+        if (this.isRunning) return;
+
+        try {
+            const res = await fetch(`/api/sessions/${sessionId}/history`);
+            const history = await res.json();
+
+            this.currentSessionId = sessionId;
+            this.chatMessages = history;
+
+            // Update UI
+            this.elements.messages.innerHTML = '';
+            this.elements.welcomeScreen.classList.add('hidden');
+            history.forEach(msg => this.renderMessage(msg.type, msg.content, msg.status, msg.timestamp));
+
+            // Update URL
+            const url = new URL(window.location);
+            url.searchParams.set('chat_id', sessionId);
+            window.history.pushState({}, '', url);
+
+            this.switchView('chat');
+
+            // Highlight in sidebar
+            document.querySelectorAll('.history-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.id == sessionId);
+            });
+
+        } catch (e) {
+            console.error('Failed to load session:', e);
+            this.startNewChat(false);
+        }
     }
 
     async sendMessage() {
         const goal = this.elements.messageInput.value.trim();
         if (!goal || this.isRunning) return;
 
+        // Ensure we have a session ID
+        if (!this.currentSessionId) {
+            const res = await fetch('/api/sessions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: goal.substring(0, 30) || 'New Chat' })
+            });
+            const session = await res.json();
+            this.currentSessionId = session.id;
+
+            // Update URL
+            const url = new URL(window.location);
+            url.searchParams.set('chat_id', session.id);
+            window.history.pushState({}, '', url);
+            this.loadRecentChats(); // Refresh sidebar to show new chat
+        }
+
         this.elements.welcomeScreen.classList.add('hidden');
         this.addMessage('user', goal);
 
         this.elements.messageInput.value = '';
-        this.elements.messageInput.style.height = 'auto';
+        this.elements.messageInput.style.height = 'auto'; // Reset height
 
         this.setRunning(true, 'Consulting Brain...');
         this.showTyping(true);
 
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({ type: 'goal', goal: goal }));
+            this.ws.send(JSON.stringify({
+                type: 'goal',
+                goal: goal,
+                session_id: this.currentSessionId
+            }));
         }
     }
 
@@ -415,24 +503,65 @@ class DeltaApp {
 
             document.getElementById('ext-detail-code').textContent = ext.source_code;
 
+            // Add Copy Button if not exists
+            const codeContainer = document.querySelector('.ext-code');
+            let actions = codeContainer.querySelector('.code-actions');
+
+            if (!actions) {
+                actions = document.createElement('div');
+                actions.className = 'code-actions';
+
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'btn-copy';
+                copyBtn.textContent = 'Copy Code';
+                copyBtn.onclick = () => {
+                    navigator.clipboard.writeText(ext.source_code);
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => copyBtn.textContent = 'Copy Code', 2000);
+                };
+
+                actions.appendChild(copyBtn);
+                codeContainer.insertBefore(actions, codeContainer.querySelector('pre'));
+            } else {
+                // Update click handler for new content
+                const copyBtn = actions.querySelector('.btn-copy');
+                copyBtn.onclick = () => {
+                    navigator.clipboard.writeText(ext.source_code);
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => copyBtn.textContent = 'Copy Code', 2000);
+                };
+            }
+
             document.getElementById('extension-modal').classList.remove('hidden');
         } catch (e) {
             console.error('Error fetching extension details:', e);
         }
     }
 
-    loadRecentChats() {
+    async loadRecentChats() {
         const history = this.elements.chatHistory;
         history.innerHTML = '';
 
-        // This is a placeholder for actual multi-chat history
-        // For now, we just show "Current Mission" if there are messages
-        if (this.chatMessages.length > 0) {
-            const item = document.createElement('div');
-            item.className = 'history-item';
-            const firstMsg = this.chatMessages.find(m => m.type === 'user');
-            item.textContent = firstMsg ? firstMsg.content : 'New Mission';
-            history.appendChild(item);
+        try {
+            const res = await fetch('/api/sessions');
+            const sessions = await res.json();
+
+            sessions.forEach(session => {
+                const item = document.createElement('div');
+                item.className = 'history-item';
+                item.textContent = session.title || 'Untitled Chat';
+                item.dataset.id = session.id;
+
+                if (this.currentSessionId && session.id === this.currentSessionId) {
+                    item.classList.add('active');
+                }
+
+                item.onclick = () => this.loadSession(session.id);
+                history.appendChild(item);
+            });
+
+        } catch (e) {
+            console.error('Failed to load recent chats:', e);
         }
     }
 

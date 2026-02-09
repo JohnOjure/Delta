@@ -55,7 +55,8 @@ class Executor:
     async def execute(
         self,
         extension: ExtensionRecord,
-        available_capabilities: dict[str, Capability]
+        available_capabilities: dict[str, Capability],
+        arguments: dict[str, Any] = None
     ) -> ExecutionResult:
         """Execute an extension with the given capabilities.
         
@@ -81,13 +82,15 @@ class Executor:
                 )
             
             # Run in sandbox with timeout
-            result = await self._execute_with_timeout(source_code, bindings)
+            # result is now (value, output)
+            value, output = await self._execute_with_timeout(source_code, bindings, arguments)
             
             execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
             
             return ExecutionResult(
                 success=True,
-                value=result,
+                value=value,
+                output=output,
                 execution_time_ms=execution_time
             )
             
@@ -114,8 +117,9 @@ class Executor:
     async def _execute_with_timeout(
         self,
         source_code: str,
-        bindings: dict[str, Any]
-    ) -> Any:
+        bindings: dict[str, Any],
+        arguments: dict[str, Any] = None
+    ) -> tuple[Any, str]:
         """Execute code with a timeout using process isolation.
         
         Uses multiprocessing to run code in a separate process that can be
@@ -125,15 +129,16 @@ class Executor:
         import multiprocessing
         import queue
         
-        def _run_in_process(result_queue, source_code, bindings, unrestricted):
+        def _run_in_process(result_queue, source_code, bindings, arguments, unrestricted):
             """Function to run in the separate process."""
             try:
                 # Create a new Sandbox instance in this process
                 # (can't share the parent's instance due to pickling)
                 from .sandbox import Sandbox
                 sandbox = Sandbox(unrestricted=unrestricted)
-                result = sandbox.execute(source_code, bindings)
-                result_queue.put(("success", result))
+                # Now returns (result, stdout_content)
+                result, stdout_content = sandbox.execute(source_code, bindings, arguments)
+                result_queue.put(("success", (result, stdout_content)))
             except Exception as e:
                 import traceback
                 result_queue.put(("error", f"{type(e).__name__}: {e}\n{traceback.format_exc()}"))
@@ -144,7 +149,7 @@ class Executor:
         # Start the process
         process = multiprocessing.Process(
             target=_run_in_process,
-            args=(result_queue, source_code, bindings, self._unrestricted)
+            args=(result_queue, source_code, bindings, arguments, self._unrestricted)
         )
         process.start()
         
@@ -161,11 +166,12 @@ class Executor:
         
         # Process completed - get the result
         try:
-            status, result = result_queue.get_nowait()
+            status, payload = result_queue.get_nowait()
             if status == "success":
-                return result
+                # Payload is (result, stdout_content)
+                return payload
             else:
-                raise SandboxError(result)
+                raise SandboxError(payload)
         except queue.Empty:
             # Process exited without putting anything in the queue
             raise SandboxError("Process terminated without returning a result")
@@ -190,16 +196,18 @@ class Executor:
         start_time = datetime.utcnow()
         
         try:
-            result = await self._execute_with_timeout(
+            value, output = await self._execute_with_timeout(
                 source_code, 
-                capability_bindings or {}
+                capability_bindings or {},
+                None
             )
             
             execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
             
             return ExecutionResult(
                 success=True,
-                value=result,
+                value=value,
+                output=output,
                 execution_time_ms=execution_time
             )
             

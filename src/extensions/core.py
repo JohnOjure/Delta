@@ -77,7 +77,7 @@ CORE_EXTENSIONS = [
         "name": "fs_read",
         "description": "Read content of a file from the local filesystem.",
         "code": """
-def extension_main(path: str) -> str:
+def extension_main(path: str, **kwargs) -> str:
     from pathlib import Path
     try:
         return Path(path).read_text()
@@ -90,7 +90,7 @@ def extension_main(path: str) -> str:
         "name": "fs_write",
         "description": "Write text content to a file, creating directories if needed.",
         "code": """
-def extension_main(path: str, content: str) -> str:
+def extension_main(path: str, content: str, **kwargs) -> str:
     from pathlib import Path
     try:
         p = Path(path)
@@ -106,7 +106,7 @@ def extension_main(path: str, content: str) -> str:
         "name": "fs_list",
         "description": "List all files and directories in a specific path.",
         "code": """
-def extension_main(path: str) -> list[str]:
+def extension_main(path: str, **kwargs) -> list[str]:
     from pathlib import Path
     try:
         return [p.name for p in Path(path).iterdir()]
@@ -119,7 +119,7 @@ def extension_main(path: str) -> list[str]:
         "name": "fs_search",
         "description": "Recursively search for files matching a glob pattern.",
         "code": """
-def extension_main(pattern: str, path: str = ".") -> list[str]:
+def extension_main(pattern: str, path: str = ".", **kwargs) -> list[str]:
     from pathlib import Path
     try:
         search_path = Path(path)
