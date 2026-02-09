@@ -80,7 +80,25 @@ EOF
 mkdir -p ~/.local/share/applications
 cp install/delta.desktop ~/.local/share/applications/delta.desktop
 ln -sf delta start.sh
+mkdir -p ~/.local/bin
+ln -sf "$PWD/venv/bin/delta" ~/.local/bin/delta
+echo -e "${GREEN}[+] Global 'delta' command installed to ~/.local/bin/delta${NC}"
 echo -e "${GREEN}[+] Desktop shortcut and start.sh created.${NC}"
+
+# Ensure ~/.local/bin is in PATH
+if ! grep -q "\$HOME/.local/bin" ~/.bashrc; then
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    echo -e "${GREEN}[+] Added ~/.local/bin to PATH in .bashrc${NC}"
+fi
+
+# Setup Background Service
+echo -e "${BLUE}[*] Setting up background service...${NC}"
+mkdir -p ~/.config/systemd/user/
+cp install/delta-agent.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable delta-agent
+systemctl --user start delta-agent
+echo -e "${GREEN}[+] Background service started.${NC}"
 
 # Launch Onboarding
 echo -e "${CYAN}"

@@ -112,7 +112,7 @@ class Agent:
         """Current agent state."""
         return self._state
     
-    async def run(self, goal: str) -> AgentResult:
+    async def run(self, goal: str, session_id: int | None = None) -> AgentResult:
         """Run the agent to accomplish a goal.
         
         This is the main entry point. The agent will:
@@ -136,7 +136,7 @@ class Agent:
         
         # Record User Message
         if self._conversation:
-            await self._conversation.add_message("user", goal)
+            await self._conversation.add_message("user", goal, session_id)
         
         
         try:
@@ -200,7 +200,7 @@ class Agent:
                     # Get conversation context
                     conv_context = ""
                     if self._conversation:
-                        conv_context = await self._conversation.get_recent_context(limit=10)
+                        conv_context = await self._conversation.get_recent_context(session_id, limit=10)
                         
                     plan_response = await self._gemini.plan(goal, env_str, context_ext_str, conv_context)
                     plan = self._planner.parse_plan(plan_response)
@@ -242,7 +242,7 @@ class Agent:
                         answer = step.details if step.details and step.details not in ["Goal accomplished", ""] else plan.analysis
                         # Record Agent Response
                         if self._conversation:
-                            await self._conversation.add_message("assistant", answer)
+                            await self._conversation.add_message("assistant", answer, session_id)
                             
                         return AgentResult(
                             success=True,
@@ -492,7 +492,7 @@ Make sure to:
                                 output_msg = f"Extension '{ext_name}' output:\nReturn: {str(result.value)[:1000]}"
                                 if result.output:
                                     output_msg += f"\nLogs:\n{result.output[:4000]}"
-                                await self._conversation.add_message("tool", output_msg)
+                                await self._conversation.add_message("tool", output_msg, session_id)
                             
                             print(f"    Result: {str(result.value)[:100]}...")
                             if result.output:
@@ -582,7 +582,7 @@ Make sure to:
                             value = result.value
                             # Add to conversation history
                             if self._conversation:
-                                await self._conversation.add_message("tool", f"Capability '{cap_name}' output: {str(value)[:1000]}")
+                                await self._conversation.add_message("tool", f"Capability '{cap_name}' output: {str(value)[:1000]}", session_id)
                                 
                             if isinstance(value, list):
                                 print(f"    Result ({len(value)} items):")
@@ -630,7 +630,7 @@ Make sure to:
                     
                     # Record Agent Response
                     if self._conversation:
-                        await self._conversation.add_message("assistant", response_text)
+                        await self._conversation.add_message("assistant", response_text, session_id)
                         
                     return AgentResult(
                         success=True,

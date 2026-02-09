@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import socket
+import uvicorn
 from pathlib import Path
 from typing import Optional, Callable
 from datetime import datetime
@@ -119,6 +120,9 @@ class DeltaService:
             tasks.append(self._hotkey_task)
         except ImportError:
             self._log("Hotkey listener not available (pynput not installed)")
+        
+        # Start Web Server
+        tasks.append(asyncio.create_task(self._run_web_server()))
         
         # Start voice listener (if available)
         try:
@@ -237,6 +241,19 @@ class DeltaService:
         
         async with server:
             await server.serve_forever()
+            
+    async def _run_web_server(self):
+        """Run the web server."""
+        config = uvicorn.Config(
+            "src.web.server:app",
+            host=self.config.web.host,
+            port=self.config.web.port,
+            log_level="info",
+            reload=False
+        )
+        server = uvicorn.Server(config)
+        self._log(f"Starting web server at http://{self.config.web.host}:{self.config.web.port}")
+        await server.serve()
     
     async def _handle_ipc_client(self, reader, writer):
         """Handle IPC client connection."""

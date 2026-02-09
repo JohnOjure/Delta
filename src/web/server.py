@@ -24,6 +24,7 @@ from src.config import get_config
 # Models
 class GoalRequest(BaseModel):
     goal: str
+    session_id: Optional[int] = None
 
 
 class ExtensionRequest(BaseModel):
@@ -115,7 +116,7 @@ async def index():
 async def run_goal(request: GoalRequest):
     """Run a goal (non-streaming)."""
     agent = await get_agent()
-    result = await agent.run(request.goal)
+    result = await agent.run(request.goal, session_id=request.session_id)
     
     return {
         "success": result.success,
@@ -209,6 +210,48 @@ async def rollback_extension(name: str, request: ExtensionRequest):
         raise HTTPException(404, f"Version '{request.version}' not found")
     
     return {"success": True, "new_version": result.metadata.version}
+
+
+class SessionCreateRequest(BaseModel):
+    title: str = "New Chat"
+
+
+@app.post("/api/sessions")
+async def create_session(request: SessionCreateRequest):
+    """Create a new session."""
+    agent = await get_agent()
+    if not agent._conversation:
+        raise HTTPException(503, "Conversation manager not initialized")
+    
+    session_id = await agent._conversation.create_session(request.title)
+    return {"id": session_id, "title": request.title}
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    """List recent sessions."""
+    agent = await get_agent()
+    if not agent._conversation:
+        return []
+    
+    return await agent._conversation.get_sessions()
+
+
+@app.get("/api/sessions/{session_id}/history")
+async def get_session_history(session_id: int):
+    """Get history for a session."""
+    agent = await get_agent()
+    if not agent._conversation:
+        return []
+    
+    return await agent._conversation.get_session_history(session_id)
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: int):
+    """Delete a session (optional, for management)."""
+    # Not yet implemented in ConversationManager but good to have endpoint ready
+    return {"success": False, "message": "Not implemented yet"}
 
 
 @app.get("/api/stats")
@@ -333,12 +376,14 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if message.get("type") == "goal":
                 goal = message.get("goal", "")
+                session_id = message.get("session_id")
                 
                 # Notify start
                 await manager.broadcast({
                     "type": "status",
                     "status": "started",
                     "goal": goal,
+                    "session_id": session_id,
                     "timestamp": datetime.utcnow().isoformat()
                 })
                 
@@ -358,7 +403,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     agent._on_status = on_status  # Attach callback
                     
                     # Run goal with real-time status updates
-                    result = await agent.run(goal)
+                    result = await agent.run(goal, session_id=session_id)
                     
                     await manager.broadcast({
                         "type": "result",
@@ -368,7 +413,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         "steps": result.steps_taken,
                         "extensions_created": result.extensions_created,
                         "requires_approval": result.requires_approval,
-                        "proposed_alternative": result.proposed_alternative,
+                        "propsed_alternative": result.proposed_alternative,
+                        "session_id": session_id,
                         "timestamp": datetime.utcnow().isoformat()
                     })
                     
