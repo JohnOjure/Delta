@@ -313,7 +313,11 @@ def main():
         except KeyboardInterrupt:
             print("\nSetup cancelled.")
     
-    print(f"\n{Colors.GREEN}You can now use 'delta' (or './delta.bat') to run the agent.{Colors.ENDC}")
+    if platform.system() == "Windows":
+        print(f"\n{Colors.GREEN}You can now use 'delta' to run the agent from any terminal.{Colors.ENDC}")
+        print(f"{Colors.GREEN}Or run './delta.bat' if PATH hasn't updated yet.{Colors.ENDC}")
+    else:
+        print(f"\n{Colors.GREEN}You can now use 'delta' to run the agent.{Colors.ENDC}")
 
 if __name__ == "__main__":
     main()

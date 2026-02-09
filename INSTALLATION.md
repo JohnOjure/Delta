@@ -109,12 +109,23 @@ If you prefer to set up everything manually:
 ### 2. Command Line Interface (CLI)
 
 - **Interactive Mode**:
+
   ```bash
+  # Linux / macOS
   ./delta
+
+  # Windows
+  delta
   ```
+
 - **Single Command**:
+
   ```bash
+  # Linux / macOS
   ./delta --goal "Research quantum computing"
+
+  # Windows
+  delta --goal "Research quantum computing"
   ```
 
 ### 3. Background Daemon (Ghost Mode)
@@ -122,7 +133,11 @@ If you prefer to set up everything manually:
 To enable proactive monitoring (Heartbeat):
 
 ```bash
+# Linux / macOS
 ./delta --daemon
+
+# Windows
+delta --daemon
 ```
 
 - Checks `~/.delta/HEARTBEAT.md` every 30 minutes.

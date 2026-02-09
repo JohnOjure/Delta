@@ -8,6 +8,8 @@ import os
 import sys
 import json
 import time
+import getpass
+import platform
 from pathlib import Path
 
 # Colors for TUI
@@ -83,7 +85,6 @@ def setup_wizard():
     print(f"\n{Colors.BLUE}[?] AI Model Configuration:{Colors.ENDC}")
     print("Delta uses Google Gemini (Fast, Smart, Multimodal).")
     
-    api_key = current_config.get("api_key", "")
     if api_key:
         mask = api_key[:4] + "*" * (len(api_key)-8) + api_key[-4:]
         print(f"Current Key: {mask}")
@@ -95,7 +96,14 @@ def setup_wizard():
         print(f"\n{Colors.BOLD}You need a Google Gemini API Key.{Colors.ENDC}")
         print("Get one here: https://aistudio.google.com/app/apikey")
         while not api_key:
-            api_key = input(f"{Colors.GREEN}Enter your API Key:{Colors.ENDC} ").strip()
+            # Use getpass to mask input, fallback to input if getpass fails in some environments
+            try:
+                api_key = getpass.getpass(f"{Colors.GREEN}Enter your API Key (hidden):{Colors.ENDC} ").strip()
+            except Exception:
+                api_key = input(f"{Colors.GREEN}Enter your API Key:{Colors.ENDC} ").strip()
+            
+            if not api_key:
+                 print(f"{Colors.RED}API Key cannot be empty.{Colors.ENDC}")
             
     # 3. Model Selection
     print(f"\n{Colors.BLUE}[?] Select Model:{Colors.ENDC}")
@@ -136,7 +144,10 @@ def setup_wizard():
     print(f"{Colors.BOLD}🎉 Setup Complete!{Colors.ENDC}")
     print(f"{Colors.CYAN}========================================{Colors.ENDC}")
     print("\nYou can now:")
-    print(f"1. Run {Colors.GREEN}./install.sh{Colors.ENDC} again to launch")
+    if platform.system() == "Windows":
+        print(f"1. Run {Colors.GREEN}delta{Colors.ENDC} or {Colors.GREEN}./delta.bat{Colors.ENDC} again to launch")
+    else:
+        print(f"1. Run {Colors.GREEN}./install.sh{Colors.ENDC} or {Colors.GREEN}delta{Colors.ENDC} again to launch")
     print(f"2. Or run {Colors.GREEN}python main.py --web{Colors.ENDC}")
     print(f"3. Or click the {Colors.BOLD}Delta Agent{Colors.ENDC} icon in your menu")
     
@@ -145,15 +156,31 @@ def setup_wizard():
     if launch != 'n':
         import subprocess
         # Assuming we are in project root or src/cli
-        # We need to find main.py relative to here
         root = Path(__file__).parent.parent.parent
         main_py = root / "main.py"
+        
         try:
             print(f"🚀 Launching at http://localhost:8000 ...")
-            # Using sys.executable to ensure we use the same python (venv)
-            subprocess.run([sys.executable, str(main_py), "--web"])
-        except KeyboardInterrupt:
-            pass
+            if platform.system() == "Windows":
+                # Check for the VBScript background launcher first
+                vbs_web = root / "delta-web.vbs"
+                if vbs_web.exists():
+                    # Launch hidden in background
+                    subprocess.Popen(["wscript", str(vbs_web)])
+                    print(f"{Colors.GREEN}✅ Launched in background.{Colors.ENDC}")
+                    print(f"{Colors.CYAN}You can now close this terminal.{Colors.ENDC}")
+                else:
+                    # Fallback to Popen to avoid blocking the current shell
+                    subprocess.Popen([sys.executable, str(main_py), "--web"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+            else:
+                # On Unix, we run it in background with & or just Popen
+                subprocess.Popen([sys.executable, str(main_py), "--web"], 
+                               stdout=subprocess.DEVNULL, 
+                               stderr=subprocess.DEVNULL,
+                               start_new_session=True)
+                
+        except Exception as e:
+            print(f"{Colors.RED}❌ Error launching: {e}{Colors.ENDC}")
 
 if __name__ == "__main__":
     try:

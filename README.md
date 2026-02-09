@@ -130,7 +130,10 @@ delta "your goal here"
 **Examples:**
 
 ```bash
-# one-off task
+# Linux / macOS
+./delta "Research the best python libraries for data analysis"
+
+# Windows
 delta "Research the best python libraries for data analysis"
 
 # Start the web interface

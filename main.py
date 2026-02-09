@@ -13,6 +13,8 @@ import asyncio
 import argparse
 import os
 import sys
+import getpass
+import platform
 from pathlib import Path
 
 # Add src to path
@@ -62,7 +64,11 @@ def ensure_config() -> UserConfig:
     print("   Get one here: https://aistudio.google.com/app/apikey")
     
     while True:
-        api_key = input("   Enter your API Key: ").strip()
+        try:
+            api_key = getpass.getpass("   Enter your API Key (hidden): ").strip()
+        except EOFError:
+            api_key = input("   Enter your API Key: ").strip()
+            
         if api_key:
             break
         print("   ❌ API Key is required.")
@@ -260,15 +266,17 @@ async def run_agent(args):
 
 def print_help():
     """Print the Delta help message."""
-    help_text = """
+    cmd = "delta" if platform.system() == "Windows" else "./delta"
+    
+    help_text = f"""
 Delta - Autonomous Extension System
 ===================================
 
 Delta is a self-evolving AI agent capable of planning, reasoning, and creating its own tools (extensions) to solve complex tasks.
 
 Usage:
-  delta [command] [options]
-  delta "your goal here"
+  {cmd} [command] [options]
+  {cmd} "your goal here"
 
 Commands:
   run <goal>           Execute a specific goal (default if no command provided)
@@ -283,10 +291,10 @@ Options:
   --debug              Enable debug logging
 
 Examples:
-  delta "Research the best python libraries for data analysis"
-  delta --web          # Start the UI at http://localhost:8000
-  delta --interactive  # Start CLI chat mode
-  delta help           # Show this message
+  {cmd} "Research the best python libraries for data analysis"
+  {cmd} --web          # Start the UI at http://localhost:8000
+  {cmd} --interactive  # Start CLI chat mode
+  {cmd} help           # Show this message
 
 For more details, see the README.md or documentation.
 """
