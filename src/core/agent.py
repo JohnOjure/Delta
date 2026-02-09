@@ -560,7 +560,8 @@ Make sure to:
 
                         # Safety: Backup critical files if extension accesses filesystem
                         backup_id = None
-                        if "fs.write" in step.params.get("capabilities_needed", []) or "fs.write" in ext_name.lower() or True:
+                        current_params = step.params or {}
+                        if "fs.write" in current_params.get("capabilities_needed", []) or "fs.write" in ext_name.lower() or True:
                             # Heuristic: always backup critical files before extension execution for now to be safe
                             # In production we might check extension capabilities metadata
                             backup_id = self._safety.create_backup([
@@ -615,10 +616,23 @@ Make sure to:
                         if result.success:
                             # Add to conversation history
                             if self._conversation:
-                                # Include both return value and stdout
-                                output_msg = f"Extension '{ext_name}' output:\nReturn: {str(result.value)[:1000]}"
+                                # Pretty print if it's a dict or list
+                                import json
+                                formatted_val = result.value
+                                try:
+                                    if isinstance(result.value, (dict, list)):
+                                        formatted_val = f"\n```json\n{json.dumps(result.value, indent=2)}\n```"
+                                except:
+                                    formatted_val = str(result.value)
+                                    
+                                output_msg = f"Extension '{ext_name}' output:\nReturn: {formatted_val}"
                                 if result.output:
-                                    output_msg += f"\nLogs:\n{result.output[:4000]}"
+                                    # Ensure we capture a good amount of logs with the new limit
+                                    output_msg += f"\nLogs:\n```\n{result.output[:16000]}\n```"
+                                
+                                # Emit real-time event for UI
+                                await self._emit_status("Tool Output", output_msg, state="tool_output")
+                                
                                 await self._conversation.add_message("tool", output_msg, session_id)
                             
                             print(f"    Result: {str(result.value)[:100]}...")
@@ -709,7 +723,15 @@ Make sure to:
                             value = result.value
                             # Add to conversation history
                             if self._conversation:
-                                await self._conversation.add_message("tool", f"Capability '{cap_name}' output: {str(value)[:1000]}", session_id)
+                                import json
+                                formatted_val = value
+                                try:
+                                    if isinstance(value, (dict, list)):
+                                        formatted_val = f"\n```json\n{json.dumps(value, indent=2)}\n```"
+                                except:
+                                    formatted_val = str(value)
+                                    
+                                await self._conversation.add_message("tool", f"Capability '{cap_name}' output: {formatted_val}", session_id)
                                 
                             if isinstance(value, list):
                                 print(f"    Result ({len(value)} items):")
@@ -755,9 +777,34 @@ Make sure to:
                     
                     response_text = reflection.get("assessment", "Goal completed.")
                     
+                    
+                    # Auto-generate summary if missing OR generic, and we have tool outputs
+                    # result variable holds the last execution result (ExecutionResult)
+                    last_output = result.value if 'result' in locals() and hasattr(result, 'value') else None
+                    if (not response_text or len(response_text) < 20 or "Goal completed" in response_text) and (extensions_created or steps_taken > 0):
+                        try:
+                            # Contextualize with the goal and last few messages
+                            data_preview = str(last_output)[:5000] if last_output else "No data returned."
+                            summary_prompt = f"The goal '{goal}' was completed. The tool output was:\n{data_preview}\n\nProvide a helpful, natural language summary of this result for the user. Do not be repetitive."
+                            summary = await self._gemini.generate(
+                                summary_prompt, 
+                                context=await self._conversation.get_recent_context(session_id, limit=3),
+                                model=self._gemini._model_name # Use fast model
+                            )
+                            if isinstance(summary, dict): summary = summary.get("text", str(summary))
+                            response_text = summary.strip()
+                            
+                            # Add to conversation so it shows up
+                            if self._conversation:
+                                await self._conversation.add_message("assistant", response_text, session_id)
+                        except Exception as e:
+                            print(f"Failed to generate auto-summary: {e}")
+
                     # Record Agent Response
-                    if self._conversation:
-                        await self._conversation.add_message("assistant", response_text, session_id)
+                    if self._conversation and response_text:
+                        # If we just generated it, it's already added? No, avoid duplicate
+                        # actually the block above adds it.
+                        pass
                         
                     return AgentResult(
                         success=True,

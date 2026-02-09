@@ -192,7 +192,8 @@ class DeltaApp {
     }
 
     async startNewChat(createNow = true) {
-        if (this.isRunning) return;
+        // Remove isRunning check to allow starting new chat while another runs in background
+        // if (this.isRunning) return; 
 
         this.currentSessionId = null;
         this.chatMessages = [];
@@ -234,7 +235,8 @@ class DeltaApp {
     }
 
     async loadSession(sessionId) {
-        if (this.isRunning) return;
+        // Remove isRunning check to allow loading sessions while another runs in background
+        // if (this.isRunning) return; 
 
         try {
             const res = await fetch(`/api/sessions/${sessionId}/history`);
@@ -306,8 +308,14 @@ class DeltaApp {
     }
 
     handleServerMessage(data) {
+        // Filter messages by session_id to ensure we only update the current chat 
+        // if we are in one. If data.session_id is missing (older versions), we fall back.
+        const isCurrentSession = !data.session_id || data.session_id == this.currentSessionId;
+
         switch (data.type) {
             case 'thinking':
+                if (!isCurrentSession) return; // Ignore background thinking updates
+                
                 // Check if this is a code preview
                 if (data.state === 'code_preview' && data.code) {
                     this.showCodePreview(data.extension_name, data.code, data.details);
@@ -315,15 +323,34 @@ class DeltaApp {
                     this.updateThinking(data.activity, data.details);
                 }
                 break;
+            case 'tool_output':
+                if (isCurrentSession) {
+                    // Render tool output immediately as a "Tool" message
+                    this.renderMessage('tool', data.output, 'success');
+                    this.scrollToBottom();
+                }
+                break;
             case 'result':
-                this.finishThinking(true);
-                this.handleResult(data);
-                this.setRunning(false);
+                // If this is for the current session, render it immediately
+                if (isCurrentSession) {
+                    this.finishThinking(true);
+                    this.handleResult(data);
+                    this.setRunning(false);
+                } else {
+                    // It's a background session completing. 
+                    // Just refresh sidebar and maybe show a toast.
+                    this.loadRecentChats();
+                    this.showToast(`Background task completed in another chat.`, 'success');
+                }
                 break;
             case 'error':
-                this.finishThinking(false);
-                this.addMessage('agent', data.error || 'Operation failed', 'error');
-                this.setRunning(false);
+                if (isCurrentSession) {
+                    this.finishThinking(false);
+                    this.addMessage('agent', data.error || 'Operation failed', 'error');
+                    this.setRunning(false);
+                } else {
+                   this.showToast(`Error in background task: ${data.error}`, 'error');
+                }
                 break;
         }
     }
@@ -403,25 +430,65 @@ class DeltaApp {
     formatMarkdown(text) {
         if (!text) return '';
 
-        // Code Blocks
+        // 1. Handle explicit Code Blocks first to avoid interference
         text = text.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
             const cleanCode = this.escapeHtml(code.trim());
-            // Store code in data attribute for easy copying
-            const codeId = 'code-' + Math.random().toString(36).substr(2, 9);
+            const displayLang = lang || 'python';
             
-            // We use a small script to handle the copy because onclick handlers in innerHTML are tricky with scoping
-            // Instead we'll delegate the event or use inline JS carefully
-            return `<div class="code-block-wrapper">
-                <div class="code-header">
-                    <span class="code-lang">${lang || 'python'}</span>
-                    <button class="code-copy-btn" onclick="window.deltaApp.copyToClipboard(this)">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                        Copy
-                    </button>
-                </div>
-                <pre><code class="language-${lang || 'python'}">${cleanCode}</code></pre>
-                <div class="code-content hidden">${this.escapeHtml(code.trim())}</div> 
-            </div>`;
+            return `
+<div class="code-block-wrapper">
+    <div class="code-header">
+        <span class="code-lang">${displayLang}</span>
+        <button class="code-copy-btn" onclick="window.deltaApp.copyToClipboard(this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy
+        </button>
+    </div>
+    <pre><code class="language-${displayLang}">${cleanCode}</code></pre>
+</div>`;
+        });
+
+        // 2. Auto-detect and Pretty-print RAW JSON/Dicts (only if NOT already in a code block)
+        // We look for "Return: {" pattern and take everything until specific boundary characters 
+        // that typically follow it in tool outputs
+        const jsonPattern = /(?:Return:\s*)?(\{[\s\S]{15,}\}|\[[\s\S]{15,}\])/g;
+        text = text.replace(jsonPattern, (match) => {
+            // If this was already processed into HTML wrapper, skip
+            if (match.includes('div') || match.includes('code-block')) return match;
+            
+            try {
+                let jsonStr = match.trim();
+                if (jsonStr.startsWith('Return:')) jsonStr = jsonStr.replace('Return:', '').trim();
+                
+                // Heuristic conversion for Python dicts
+                jsonStr = jsonStr.replace(/'/g, '"')
+                                 .replace(/(\W)True(\W)/g, '$1true$2')
+                                 .replace(/(\W)False(\W)/g, '$1false$2')
+                                 .replace(/(\W)None(\W)/g, '$1null$2');
+                                 
+                // Verify balanced braces (naive but helps with truncation)
+                const open = (jsonStr.match(/\{/g) || []).length;
+                const close = (jsonStr.match(/\}/g) || []).length;
+                if (open !== close && open > 0) {
+                    // It's likely truncated or malformed, but if it looks like a dict, 
+                    // we try to at least show what we have
+                }
+
+                const obj = JSON.parse(jsonStr);
+                return `\n\`\`\`json\n${JSON.stringify(obj, null, 2)}\n\`\`\`\n`;
+            } catch (e) {
+                return match;
+            }
+        });
+
+        // 3. Re-process any newly created json blocks from step 2
+        text = text.replace(/```json\n([\s\S]*?)```/g, (match, code) => {
+             const cleanCode = this.escapeHtml(code.trim());
+             return `
+<div class="code-block-wrapper">
+    <div class="code-header"><span class="code-lang">json</span></div>
+    <pre><code class="language-json">${cleanCode}</code></pre>
+</div>`;
         });
 
         // Inline Code
@@ -463,12 +530,6 @@ class DeltaApp {
                 </div>
                 <div class="thinking-logs">
                     <div class="log-list"></div>
-                    <div class="working-indicator">
-                        <div class="thinking-dots">
-                            <span></span><span></span><span></span>
-                        </div>
-                        <span class="working-text">Thinking...</span>
-                    </div>
                 </div>
             `;
 
@@ -523,6 +584,9 @@ class DeltaApp {
         const currentProcess = this.elements.messages.querySelector('.thinking-process.active');
         if (currentProcess) {
             currentProcess.classList.remove('active');
+            
+            // Auto-collapse on completion to keep UI clean
+            currentProcess.classList.remove('expanded');
 
             // Hide working indicator
             const workingIndicator = currentProcess.querySelector('.working-indicator');
@@ -532,14 +596,12 @@ class DeltaApp {
 
             const spinner = currentProcess.querySelector('.thinking-spinner');
             if (spinner) {
-                spinner.style.border = 'none';
-                spinner.style.animation = 'none';
+                spinner.className = 'thinking-complete-icon';
                 spinner.textContent = success ? '✓' : '✗';
                 spinner.style.color = success ? 'var(--accent-primary)' : '#f87171';
-                spinner.style.display = 'flex';
-                spinner.style.alignItems = 'center';
-                spinner.style.justifyContent = 'center';
                 spinner.style.fontWeight = 'bold';
+                spinner.style.border = 'none';
+                spinner.style.animation = 'none';
             }
         }
     }

@@ -261,9 +261,15 @@ Available actions:
 
 DECISION GUIDE:
 - User asks to WRITE/SAVE/CREATE a file → use "use_capability" with fs.write, then "complete"
-- User asks to READ a file → use "use_capability" with fs.read, then "complete"
+- User asks to READ a file → use "use_capability" with fs.read, then "complete" with a summary of the file content
 - User asks a question (no file ops) → use only "complete" with answer in details
 - User wants something AND to save it → use "use_capability" to save, then "complete"
+- User asks for stats/info → run the extension, then "complete" with a NATURAL LANGUAGE ANALYSIS of the stats
+
+CRITICAL - FINAL STEP MUST INTERPRET RESULTS:
+- NEVER end with just "execute_extension".
+- ALWAYS add a final "complete" step to read the extension's output and explain it to the user.
+- Example: Step 1: run system_stats. Step 2: complete (details: "Your CPU is at 45% load...")
 
 CRITICAL - EXTENSIONS vs FILES:
 - "save as EXTENSION" or "create extension" or "register extension" → use "create_extension" action (NOT fs.write!)
@@ -402,7 +408,7 @@ Respond with JSON:
 
 Respond with JSON:
 {{
-    "assessment": "what happened and why",
+    "assessment": "Natural language summary of what was accomplished for the user",
     "learnings": ["learning1", "learning2"],
     "suggestions": ["suggestion1", "suggestion2"],
     "should_retry": true/false,

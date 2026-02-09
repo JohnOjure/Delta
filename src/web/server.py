@@ -402,7 +402,15 @@ async def websocket_endpoint(websocket: WebSocket):
                         if status.get("code"):
                             broadcast_data["code"] = status.get("code")
                             broadcast_data["extension_name"] = status.get("extension_name", "")
+                        
+                        # Handle direct tool outputs
+                        if status.get("state") == "tool_output":
+                            broadcast_data["type"] = "tool_output"
+                            broadcast_data["output"] = status.get("details", "")
+                        
                         await manager.broadcast(broadcast_data)
+
+                        # await manager.broadcast(broadcast_data)
                     
                     agent = await get_agent()
                     agent._on_status = on_status  # Attach callback
